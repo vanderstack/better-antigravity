@@ -1,0 +1,12 @@
+.env
+publish-ovsx.mjs
+.git/
+.gitignore
+node_modules/
+out/
+src/
+build.mjs
+tsconfig.json
+*.bak
+*.log
+*.map

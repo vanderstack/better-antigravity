@@ -1,0 +1,10 @@
+GEMINI.md
+node_modules/
+dist/
+out/
+.env
+*.vsix
+*.bak
+*.log
+.DS_Store
+Thumbs.db

@@ -4,9 +4,9 @@
 
 **Community-driven fixes and improvements for [Antigravity IDE](https://antigravity.dev)**
 
+[![Open VSX](https://img.shields.io/open-vsx/v/kanezal/better-antigravity)](https://open-vsx.org/extension/kanezal/better-antigravity)
 [![npm](https://img.shields.io/npm/v/better-antigravity)](https://www.npmjs.com/package/better-antigravity)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Kanezal/better-antigravity/pulls)
 [![Antigravity](https://img.shields.io/badge/Antigravity-v1.107.0+-blue.svg)](https://antigravity.dev)
 
 *Antigravity is great. We just make it a little better.*
@@ -17,64 +17,38 @@
 
 ## What is this?
 
-A collection of **hotfixes and patches** for bugs in Antigravity IDE that haven't been officially resolved yet. Each fix is a standalone script you can apply and revert safely.
+Better Antigravity is both a **VS Code extension** and an **npm CLI tool** that fixes known bugs and adds quality-of-life features to Antigravity IDE.
 
-> **Note:** These are unofficial community patches. Use at your own risk. All fixes create automatic backups and can be reverted with a single command.
+| Channel | What it does | Install |
+|---------|-------------|---------|
+| **Extension** | Auto-applies fixes on startup + chat rename + SDK features | [Open VSX](https://open-vsx.org/extension/kanezal/better-antigravity) |
+| **CLI** | Quick one-off patching via `npx` (no extension install needed) | `npx better-antigravity auto-run` |
+
+> [!NOTE]
+> The extension includes everything the CLI does, plus extra features powered by the [Antigravity SDK](https://www.npmjs.com/package/antigravity-sdk). If you install the extension, you don't need the CLI.
 
 ---
 
-## Quick Start
+## Install (Extension)
+
+Search for **"Better Antigravity"** in the Extensions panel, or install from [Open VSX](https://open-vsx.org/extension/kanezal/better-antigravity).
+
+Manual install:
 
 ```bash
-npx better-antigravity auto-run
+antigravity --install-extension better-antigravity-0.2.0.vsix --force
 ```
 
-That's it. Restart Antigravity and your "Always Proceed" setting actually works now.
+On activation the extension will:
+1. **Auto-apply the auto-run fix** (silent, no prompt)
+2. **Initialize the SDK** for chat rename and future features
+3. **Install the integration script** (prompts for reload on first install, auto-reloads on updates)
 
 ---
 
-## Available Fixes
+## Install (CLI only)
 
-| Fix | Description | Status |
-|-----|-------------|--------|
-| [**auto-run-fix**](#auto-run-fix) | "Always Proceed" terminal policy doesn't auto-execute commands | ✅ Working |
-
----
-
-## Auto-Run Fix
-
-### The Problem
-
-You set **Settings → Agent → Terminal Execution → "Always Proceed"**, but Antigravity **still asks you to click "Run"** on every single terminal command. Every. Single. Time.
-
-The setting saves correctly, Strict Mode is off — it just doesn't work.
-
-### Root Cause
-
-Found in the source code: the `run_command` step renderer component has an `onChange` handler that auto-confirms commands when you switch the dropdown to "Always run" **on a specific step**. But there's **no `useEffect` hook** that checks the saved policy at mount time and auto-confirms **new steps**.
-
-In other words: the UI reads your setting, displays the correct dropdown value, but never actually acts on it automatically.
-
-```javascript
-// What exists (only fires on dropdown CHANGE):
-y = Mt(_ => {
-    setTerminalAutoExecutionPolicy(_),
-    _ === EAGER && confirm(true) // ← only when you manually switch
-}, [])
-
-// What's MISSING (should fire on component mount):
-useEffect(() => {
-    if (policy === EAGER && !secureMode) confirm(true) // ← auto-confirm new steps
-}, [])
-```
-
-### The Fix
-
-Our patcher adds the missing `useEffect`. It uses **regex pattern matching** to find code by structure — not by minified variable names — so it works across Antigravity versions.
-
-### Usage
-
-**Via npx (recommended):**
+If you just want the auto-run fix without installing an extension:
 
 ```bash
 npx better-antigravity auto-run            # apply fix
@@ -82,68 +56,77 @@ npx better-antigravity auto-run --check    # check status
 npx better-antigravity auto-run --revert   # revert to original
 ```
 
-**Custom install path** (if Antigravity is not in the default location):
+Custom install path (if Antigravity is not in the default location):
 
 ```bash
-# Option A: run from the Antigravity directory
-cd "D:\Antigravity" && npx better-antigravity auto-run
-
-# Option B: use --path flag
 npx better-antigravity auto-run --path "D:\Antigravity"
 ```
 
-> The tool auto-detects Antigravity by scanning: current directory, PATH, Windows Registry, and default install locations. Use `--path` only if auto-detection fails.
+---
 
-**Via clone:**
+## Features
 
-```bash
-git clone https://github.com/Kanezal/better-antigravity.git
-cd better-antigravity
-node fixes/auto-run-fix/patch.js
+### Auto-Run Fix
+
+**The problem:** You set **Settings -> Agent -> Terminal Execution -> "Always Proceed"**, but Antigravity **still asks you to click "Run"** on every terminal command.
+
+**Root cause:** The `run_command` step renderer has an `onChange` handler that auto-confirms when you switch the dropdown, but there's **no `useEffect`** that checks the saved policy at mount time.
+
+```javascript
+// What exists (only fires on dropdown CHANGE):
+onChange = useCallback(_ => {
+    setPolicy(_), _ === EAGER && confirm(true)
+}, [])
+
+// What's MISSING (should fire on mount):
+useEffect(() => {
+    if (policy === EAGER && !secureMode) confirm(true)
+}, [])
 ```
 
-### Example Output
+**The fix:** Our patcher adds the missing `useEffect`. It uses **structural regex matching** (not hardcoded variable names) so it works across Antigravity versions.
 
-```
-╔══════════════════════════════════════════════════╗
-║  Antigravity "Always Proceed" Auto-Run Fix      ║
-╚══════════════════════════════════════════════════╝
+> For the full root cause analysis, pattern matching explanation, and example output, see **[FIXES.md](FIXES.md)**.
 
-📍 C:\Users\user\AppData\Local\Programs\Antigravity
-📦 Version: 1.107.0 (IDE 1.19.5)
+### Chat Rename (Extension only)
 
-  📋 [workbench] Found onChange at offset 12362782
-     callback=Mt, enum=Dhe, confirm=b
-     policyVar=u
-     secureVar=d
-     useEffect=mn (confidence: 30 hits)
-  ✅ [workbench] Patched (+43 bytes)
-  📋 [jetskiAgent] Found onChange at offset 8388797
-     callback=ve, enum=rx, confirm=F
-     policyVar=d
-     secureVar=f
-     useEffect=At (confidence: 55 hits)
-  ✅ [jetskiAgent] Patched (+42 bytes)
+Rename conversations to custom titles via the [Antigravity SDK](https://www.npmjs.com/package/antigravity-sdk) title proxy. Custom titles override the auto-generated summaries in the sidebar.
 
-✨ Done! Restart Antigravity.
-```
+### Status Command (Extension only)
 
-### Compatibility
+`Ctrl+Shift+P` -> **"Better Antigravity: Show Status"** to see:
+- SDK initialization state
+- Language Server connection
+- Integration script status
+- Auto-run fix status per file
 
-| Antigravity Version | Status |
-|---------------------|--------|
-| 1.107.0 | ✅ Tested |
-| Other versions | Should work (dynamic pattern matching) |
+---
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `Better Antigravity: Show Status` | Show extension and fix status |
+| `Better Antigravity: Revert Auto-Run Fix` | Restore original files from backup |
 
 ---
 
 ## Safety
 
-- **Automatic backups** — original files are saved as `.bak` before patching
-- **One-command revert** — run with `--revert` to restore originals instantly
-- **Non-destructive** — patches only add code, never remove existing logic
-- **Version-resilient** — uses structural regex matching, not hardcoded variable names
-- **Syntax validation** — verifies code structure before writing
+- **Automatic backups** -- original files saved as `.ba-backup` before patching
+- **One-command revert** -- CLI `--revert` or extension command
+- **Non-destructive** -- patches only add code, never remove existing logic
+- **Version-resilient** -- structural regex matching, not hardcoded variable names
+- **Async I/O** -- file operations don't block the extension host
+
+---
+
+## Compatibility
+
+| Antigravity Version | Status |
+|---------------------|--------|
+| 1.107.0 | Tested |
+| Other versions | Should work (dynamic pattern matching) |
 
 ---
 
@@ -151,43 +134,54 @@ node fixes/auto-run-fix/patch.js
 
 ```
 better-antigravity/
-├── cli.js              # npx entry point
-├── package.json        # npm package config
-├── README.md
-├── LICENSE
-└── fixes/
-    └── auto-run-fix/
-        └── patch.js    # The patcher script
+├── src/
+│   ├── extension.ts       # Extension entry point (thin orchestrator)
+│   ├── auto-run.ts        # Auto-run fix logic (async, no vscode dependency)
+│   └── commands.ts        # VS Code command handlers
+├── fixes/
+│   └── auto-run-fix/
+│       └── patch.js       # Standalone CLI patcher
+├── cli.js                 # npx entry point
+├── build.mjs              # esbuild config
+├── publish-ovsx.mjs       # Open VSX publish script
+└── package.json           # Dual: npm package + VS Code extension
 ```
+
+---
+
+## Development
+
+```bash
+npm install
+npm run build              # Compile extension
+npm run watch              # Watch mode
+npm run package            # Build VSIX -> out/
+npm run publish:ovsx       # Publish to Open VSX (reads .env)
+```
+
+The extension depends on [antigravity-sdk](https://www.npmjs.com/package/antigravity-sdk) from the monorepo sibling directory. The build script aliases it automatically.
 
 ---
 
 ## Contributing
 
-Found another Antigravity bug? Have a fix? PRs are welcome!
+Found another Antigravity bug? Have a fix? PRs are welcome.
 
 ### Adding a new fix:
 
 1. Create a folder under `fixes/` with a descriptive name
 2. Include a `patch.js` that supports `--check` and `--revert` flags
-3. Add a `README.md` with root cause analysis
-4. Update the main README's fix table
-
-### Guidelines:
-
-- Always create backups before patching
-- Use structural pattern matching, not hardcoded variable names
-- Support `--check` and `--revert` flags
-- Test on a clean Antigravity installation
+3. Use structural pattern matching, not hardcoded variable names
+4. Update this README's feature table
 
 ---
 
 ## Disclaimer
 
 > [!WARNING]
-> This project is not affiliated with Google or the Antigravity team. These are community patches for known bugs. If Antigravity updates and the patches break, simply revert and re-apply (or wait for an updated patch).
+> This project is not affiliated with Google or the Antigravity team. These are community patches and improvements. If Antigravity updates and the patches break, simply revert and re-apply (or wait for an updated patch).
 
-**Always report bugs officially** at [antigravity.google/support](https://antigravity.google/support) — community patches are temporary solutions, not replacements for official fixes.
+**Always report bugs officially** at [antigravity.google/support](https://antigravity.google/support) -- community patches are temporary solutions, not replacements for official fixes.
 
 ---
 

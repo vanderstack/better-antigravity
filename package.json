@@ -1,29 +1,68 @@
 {
   "name": "better-antigravity",
-  "version": "0.1.1",
-  "description": "Community-driven fixes and improvements for Antigravity IDE",
-  "main": "fixes/auto-run-fix/patch.js",
+  "displayName": "Better Antigravity",
+  "description": "Community-driven fixes and improvements for Antigravity IDE — auto-run fix, chat rename, and more",
+  "version": "0.2.0",
+  "publisher": "kanezal",
+  "icon": "static/BA-background.png",
+  "galleryBanner": {
+    "color": "#1a1a1a",
+    "theme": "dark"
+  },
+  "markdown": "github",
+  "badges": [
+    {
+      "url": "https://img.shields.io/npm/v/better-antigravity",
+      "href": "https://www.npmjs.com/package/better-antigravity",
+      "description": "npm version"
+    },
+    {
+      "url": "https://img.shields.io/badge/License-AGPL--3.0-blue.svg",
+      "href": "https://github.com/Kanezal/better-antigravity/blob/main/LICENSE",
+      "description": "License: AGPL-3.0"
+    },
+    {
+      "url": "https://img.shields.io/badge/Antigravity-v1.107.0+-blue.svg",
+      "href": "https://antigravity.dev",
+      "description": "Antigravity compatibility"
+    }
+  ],
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=16.0.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
   "bin": {
     "better-antigravity": "cli.js"
   },
+  "contributes": {
+    "commands": [
+      {
+        "command": "better-antigravity.status",
+        "title": "Better Antigravity: Show Status"
+      },
+      {
+        "command": "better-antigravity.revertAutoRun",
+        "title": "Better Antigravity: Revert Auto-Run Fix"
+      }
+    ]
+  },
   "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "prepackage": "node -e \"require('fs').mkdirSync('out',{recursive:true})\"",
+    "package": "npm run prepackage && npx @vscode/vsce package --no-dependencies --out out/better-antigravity.vsix",
+    "publish:ovsx": "node publish-ovsx.mjs",
     "fix:auto-run": "node fixes/auto-run-fix/patch.js",
     "fix:auto-run:check": "node fixes/auto-run-fix/patch.js --check",
     "fix:auto-run:revert": "node fixes/auto-run-fix/patch.js --revert"
   },
-  "keywords": [
-    "antigravity",
-    "antigravity-ide",
-    "google-antigravity",
-    "fix",
-    "patch",
-    "auto-run",
-    "terminal",
-    "always-proceed",
-    "community"
-  ],
-  "author": "Kanezal",
-  "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/Kanezal/better-antigravity"
@@ -32,7 +71,24 @@
   "bugs": {
     "url": "https://github.com/Kanezal/better-antigravity/issues"
   },
-  "engines": {
-    "node": ">=16.0.0"
+  "author": "Kanezal",
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "antigravity",
+    "antigravity-ide",
+    "google-antigravity",
+    "fix",
+    "auto-run",
+    "rename-chat",
+    "community"
+  ],
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0"
+  },
+  "dependencies": {
+    "antigravity-sdk": "^1.3.0",
+    "sql.js": "^1.14.0"
   }
 }
