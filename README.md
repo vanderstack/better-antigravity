@@ -193,7 +193,7 @@ Found another Antigravity bug? Have a fix? PRs are welcome.
 
 ---
 
-## Support
+## ❤️ Support
 
 If you find this project useful and want to support its development, you can send **USDT** to:
 
