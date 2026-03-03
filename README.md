@@ -36,13 +36,14 @@ Search for **"Better Antigravity"** in the Extensions panel, or install from [Op
 Manual install:
 
 ```bash
-antigravity --install-extension better-antigravity-0.2.0.vsix --force
+antigravity --install-extension better-antigravity-0.4.0.vsix --force
 ```
 
 On activation the extension will:
 1. **Auto-apply the auto-run fix** (silent, no prompt)
 2. **Initialize the SDK** for chat rename and future features
 3. **Install the integration script** (prompts for reload on first install, auto-reloads on updates)
+4. **Suppress integrity warnings** ("corrupt installation" notification silenced automatically)
 
 ---
 
@@ -91,6 +92,12 @@ useEffect(() => {
 ### Chat Rename (Extension only)
 
 Rename conversations to custom titles via the [Antigravity SDK](https://www.npmjs.com/package/antigravity-sdk) title proxy. Custom titles override the auto-generated summaries in the sidebar.
+
+### Integrity Check Suppression (Extension only)
+
+When the SDK patches workbench.html, Antigravity shows a sticky "Your installation appears to be corrupt" warning with no dismiss button. As of v0.4.0, the extension automatically updates the checksum in `product.json` after patching so IntegrityService sees `isPure = true`. No warnings on next restart.
+
+Multiple SDK-based extensions are coordinated automatically -- the original checksum is restored only when the last extension uninstalls.
 
 ### Status Command (Extension only)
 
