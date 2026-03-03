@@ -24,24 +24,27 @@ const config = {
 // Ensure dist/ exists
 if (!fs.existsSync('dist')) fs.mkdirSync('dist');
 
-// Copy sql-wasm.wasm to dist/ (required by antigravity-sdk's StateBridge)
-const wasmSearchPaths = [
-    path.join('node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
-    path.join('..', 'antigravity-sdk', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
-];
+// Copy sql-wasm.wasm AND sql-wasm.js to dist/ (required by antigravity-sdk's StateBridge)
+const sqlFiles = ['sql-wasm.wasm', 'sql-wasm.js'];
+for (const sqlFile of sqlFiles) {
+    const searchPaths = [
+        path.join('node_modules', 'sql.js', 'dist', sqlFile),
+        path.join('..', 'antigravity-sdk', 'node_modules', 'sql.js', 'dist', sqlFile),
+    ];
 
-let wasmCopied = false;
-for (const wasmSrc of wasmSearchPaths) {
-    if (fs.existsSync(wasmSrc)) {
-        fs.copyFileSync(wasmSrc, path.join('dist', 'sql-wasm.wasm'));
-        console.log(`Copied sql-wasm.wasm from ${wasmSrc}`);
-        wasmCopied = true;
-        break;
+    let copied = false;
+    for (const src of searchPaths) {
+        if (fs.existsSync(src)) {
+            fs.copyFileSync(src, path.join('dist', sqlFile));
+            console.log(`Copied ${sqlFile} from ${src}`);
+            copied = true;
+            break;
+        }
     }
-}
-if (!wasmCopied) {
-    console.error('ERROR: sql-wasm.wasm not found. Run "npm install" first.');
-    process.exit(1);
+    if (!copied) {
+        console.error(`ERROR: ${sqlFile} not found. Run "npm install" first.`);
+        process.exit(1);
+    }
 }
 
 if (isWatch) {

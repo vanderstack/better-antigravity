@@ -7,6 +7,8 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fsp from 'fs/promises';
 import { AntigravitySDK } from 'antigravity-sdk';
 import { getWorkbenchDir, getTargetFiles, isPatched, revertAll } from './auto-run';
 
@@ -40,6 +42,9 @@ export async function status(sdk: AntigravitySDK | null, output: vscode.OutputCh
 
 /**
  * Revert the auto-run fix and prompt for reload.
+ *
+ * Also clears V8 Code Cache to prevent stale cached patched code
+ * from being loaded by Electron (which causes grey screen).
  */
 export async function revertAutoRun(): Promise<void> {
     const dir = getWorkbenchDir();
@@ -52,8 +57,19 @@ export async function revertAutoRun(): Promise<void> {
     const reverted = results.filter(r => r.status === 'reverted').length;
 
     if (reverted > 0) {
+        // Clear V8 Code Cache — stale cache after revert causes grey screen
+        const appData = process.env.APPDATA || '';
+        const cacheDirs = [
+            path.join(appData, 'Antigravity', 'CachedData'),
+            path.join(appData, 'Antigravity', 'GPUCache'),
+            path.join(appData, 'Antigravity', 'Code Cache'),
+        ];
+        for (const d of cacheDirs) {
+            try { await fsp.rm(d, { recursive: true, force: true }); } catch { /* may not exist */ }
+        }
+
         const action = await vscode.window.showInformationMessage(
-            `Auto-run fix reverted (${reverted} file(s)). Reload to apply.`,
+            `Auto-run fix reverted (${reverted} file(s)). Caches cleared. Reload to apply.`,
             'Reload Now',
         );
         if (action === 'Reload Now') {
