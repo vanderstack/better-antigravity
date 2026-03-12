@@ -19,6 +19,8 @@ export class TelegramBotManager {
     private bridge: AntigravityBridge | null = null;
     private bridgeManager: TelegramBridgeManager | null = null;
     private tracing: TracingManager | null = null;
+    private progressMessages: Map<number, number> = new Map(); // chatId -> messageId data
+    private volatileShortIdMap: Map<number, Map<number, string>> = new Map(); // chatId -> (shortId -> cascadeId)
 
     constructor(
         private readonly sdk: AntigravitySDK,
@@ -53,10 +55,10 @@ export class TelegramBotManager {
 
         try {
             this.bot = new Bot(token);
-            this.bridge = new AntigravityBridge(this.sdk, this.tracing || undefined);
+            const bridgePath = config.get<string>('bridgePath') || '/config/gravity-claw/telegram_bridge';
+            this.bridge = new AntigravityBridge(this.sdk, bridgePath, this.tracing || undefined);
 
             // Initialize the High-Reliability Queue Bridge
-            const bridgePath = config.get<string>('bridgePath') || '/config/gravity-claw/telegram_bridge';
             this.bridgeManager = new TelegramBridgeManager(this.bot, bridgePath, this.output);
             await this.bridgeManager.start();
 
@@ -66,10 +68,15 @@ export class TelegramBotManager {
             // Setup command and message handlers
             setupHandlers(this.bot, this.bridge, this);
 
-            // Start Monitoring for agent responses
+            // Start Monitoring for agent responses and status updates
             this.bridge.startMonitoring(
                 (chatId, text) => {
+                    // Cleanup progress message if it exists
+                    this.clearProgressMessage(chatId);
                     this.bot?.api.sendMessage(chatId, text).catch(e => this.log(`Failed to send response: ${e.message}`));
+                },
+                (chatId, title) => {
+                    this.handleStatusUpdate(chatId, title);
                 },
                 (msg) => this.log(msg)
             );
@@ -137,6 +144,65 @@ export class TelegramBotManager {
      */
     showLogs() {
         this.output.show(true);
+    }
+
+    /**
+     * Updates/Sends a progress message and keeps the typing indicator alive.
+     */
+    private async handleStatusUpdate(chatId: number, title: string) {
+        try {
+            // 1. Keep typing indicator alive
+            this.bot?.api.sendChatAction(chatId, 'typing').catch(() => {});
+
+            const progressText = `_⏳ ${title}_`;
+
+            // 2. Manage the progress message (Single message that gets edited)
+            if (this.progressMessages.has(chatId)) {
+                const msgId = this.progressMessages.get(chatId)!;
+                try {
+                    await this.bot?.api.editMessageText(chatId, msgId, progressText, { parse_mode: 'Markdown' });
+                } catch (err: any) {
+                    // If message was deleted or can't be edited, just send a new one
+                    if (err.description?.includes("message is not modified")) return;
+                    const newMsg = await this.bot?.api.sendMessage(chatId, progressText, { parse_mode: 'Markdown' });
+                    if (newMsg) this.progressMessages.set(chatId, newMsg.message_id);
+                }
+            } else {
+                const newMsg = await this.bot?.api.sendMessage(chatId, progressText, { parse_mode: 'Markdown' });
+                if (newMsg) this.progressMessages.set(chatId, newMsg.message_id);
+            }
+        } catch (err: any) {
+            this.log(`Error in handleStatusUpdate: ${err.message}`);
+        }
+    }
+
+    /**
+     * Stores a volatile mapping of short IDs to cascade IDs for a chat.
+     */
+    public setSessionMap(chatId: number, idMap: Map<number, string>) {
+        this.volatileShortIdMap.set(chatId, idMap);
+    }
+
+    /**
+     * Retrieves a cascade ID from the volatile map.
+     */
+    public getSessionFromMap(chatId: number, shortId: number): string | undefined {
+        return this.volatileShortIdMap.get(chatId)?.get(shortId);
+    }
+
+    /**
+     * Deletes the progress message for a chat.
+     */
+    private async clearProgressMessage(chatId: number) {
+        if (this.progressMessages.has(chatId)) {
+            const msgId = this.progressMessages.get(chatId)!;
+            this.progressMessages.delete(chatId);
+            try {
+                await this.bot?.api.deleteMessage(chatId, msgId);
+            } catch {
+                // Ignore errors if message already deleted
+            }
+        }
     }
 
     public log(msg: string) {

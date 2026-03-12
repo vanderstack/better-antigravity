@@ -41,6 +41,7 @@ export class TelegramBridgeManager {
         
         // Initial sweep
         await this.scanOutbox();
+        await this.scanPending();
 
         // 1. Chokidar Watcher
         this.watcher = chokidar.watch(path.join(this.baseDir, 'outbox'), {
@@ -61,6 +62,7 @@ export class TelegramBridgeManager {
         // 2. 1s Heartbeat Poll (Convergence)
         this.heartbeatInterval = setInterval(() => {
             this.scanOutbox();
+            this.scanPending();
         }, 1000);
 
         // 3. Cleanup (Every 5 minutes for faster rotation)
@@ -94,8 +96,12 @@ export class TelegramBridgeManager {
             
             const files = fs.readdirSync(outboxPath).filter(f => f.endsWith('.json'));
 
+            if (files.length > 0) {
+                this.log(`Found ${files.length} messages in outbox.`);
+            }
+
             for (const file of files) {
-                await this.processFile(file);
+                await this.processFile(file, 'outbox');
             }
         } catch (err: any) {
             this.log(`Error scanning outbox: ${err.message}`);
@@ -104,16 +110,42 @@ export class TelegramBridgeManager {
         }
     }
 
-    private async processFile(filename: string) {
+    private async scanPending() {
+        if (this.isProcessing) return;
+        this.isProcessing = true;
+
+        try {
+            const pendingPath = path.join(this.baseDir, 'pending');
+            if (!fs.existsSync(pendingPath)) return;
+            
+            const files = fs.readdirSync(pendingPath).filter(f => f.endsWith('.json'));
+            
+            if (files.length > 0) {
+                this.log(`Found ${files.length} orphaned messages in pending. Recovering...`);
+            }
+
+            for (const file of files) {
+                await this.processFile(file, 'pending');
+            }
+        } catch (err: any) {
+            this.log(`Error scanning pending: ${err.message}`);
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    private async processFile(filename: string, source: 'outbox' | 'pending') {
         const outPath = path.join(this.baseDir, 'outbox', filename);
         const pendingPath = path.join(this.baseDir, 'pending', filename);
 
         try {
-            // Atomic move to pending
-            if (!fs.existsSync(outPath)) return;
-            fs.renameSync(outPath, pendingPath);
+            if (source === 'outbox') {
+                // Atomic move to pending
+                if (!fs.existsSync(outPath)) return;
+                fs.renameSync(outPath, pendingPath);
+            }
             
-            this.log(`Processing message: ${filename}`);
+            this.log(`Processing message: ${filename} (source: ${source})`);
             const content = fs.readFileSync(pendingPath, 'utf-8');
             const data: QueuedMessage = JSON.parse(content);
 
@@ -130,10 +162,16 @@ export class TelegramBridgeManager {
                 throw new Error('No chat_id provided and no allowedUserIds configured.');
             }
 
-            // Send message
-            await this.bot.api.sendMessage(data.chat_id, data.text, {
+            // Send message with timeout
+            const sendMessagePromise = this.bot.api.sendMessage(data.chat_id, data.text, {
                 parse_mode: data.parse_mode || 'Markdown'
             });
+
+            // 15 second timeout for Telegram API
+            await Promise.race([
+                sendMessagePromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Telegram API Timeout')), 15000))
+            ]);
 
             // Handle attachment
             if (data.attachment_path) {
