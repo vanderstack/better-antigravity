@@ -9,34 +9,46 @@
  * @module auto-run
  */
 
-import * as path from 'path';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as fsp from 'fs/promises';
+import { findWorkbenchDir, findBundleDir } from 'antigravity-sdk';
 
 /** Marker comment to identify our patches */
 const PATCH_MARKER = '/*BA:autorun*/';
 
-/**
- * Resolve the Antigravity workbench directory.
- */
 export function getWorkbenchDir(): string | null {
-    const appData = process.env.LOCALAPPDATA || '';
-    const dir = path.join(
-        appData,
-        'Programs', 'Antigravity', 'resources', 'app', 'out',
-        'vs', 'code', 'electron-browser', 'workbench',
-    );
-    return fs.existsSync(dir) ? dir : null;
+    const dir = findWorkbenchDir();
+    return dir && fs.existsSync(dir) ? dir : null;
+}
+
+export function getBundleDir(): string | null {
+    const dir = findBundleDir();
+    return dir && fs.existsSync(dir) ? dir : null;
 }
 
 /**
  * Target files that need the auto-run patch.
  */
-export function getTargetFiles(workbenchDir: string): Array<{ path: string; label: string }> {
-    return [
-        { path: path.join(workbenchDir, 'workbench.desktop.main.js'), label: 'workbench' },
-        { path: path.join(workbenchDir, 'jetskiAgent.js'), label: 'jetskiAgent' },
-    ].filter(f => fs.existsSync(f.path));
+export function getTargetFiles(bundleDir: string): Array<{ path: string; label: string }> {
+    const candidates = [
+        { path: path.join(bundleDir, 'workbench.js'), label: 'workbench' },
+        { path: path.join(bundleDir, 'workbench.desktop.main.js'), label: 'workbench' },
+        { path: path.join(bundleDir, 'jetskiAgent.js'), label: 'jetskiAgent' },
+        { path: path.join(bundleDir, 'main.js'), label: 'jetskiAgent' },
+    ];
+    
+    // On split layouts (e.g. Linux), files might be in a different folder
+    // but findBundleDir() should have handled that by returning the one with JS files.
+    
+    const seen = new Set<string>();
+    return candidates.filter(f => {
+        if (fs.existsSync(f.path) && !seen.has(f.label)) {
+            seen.add(f.label);
+            return true;
+        }
+        return false;
+    });
 }
 
 /**
@@ -214,7 +226,7 @@ export interface PatchResult {
  * @returns Array of results for each file
  */
 export async function autoApply(): Promise<PatchResult[]> {
-    const dir = getWorkbenchDir();
+    const dir = getBundleDir();
     if (!dir) return [];
 
     const files = getTargetFiles(dir);
@@ -227,7 +239,7 @@ export async function autoApply(): Promise<PatchResult[]> {
  * @returns Number of files reverted
  */
 export function revertAll(): PatchResult[] {
-    const dir = getWorkbenchDir();
+    const dir = getBundleDir();
     if (!dir) return [];
 
     const files = getTargetFiles(dir);

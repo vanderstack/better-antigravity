@@ -29,8 +29,12 @@ const os = require('os');
 function isAntigravityDir(dir) {
     if (!dir) return false;
     try {
-        const workbench = path.join(dir, 'resources', 'app', 'out', 'vs', 'workbench', 'workbench.desktop.main.js');
-        return fs.existsSync(workbench);
+        const subPaths = [
+            'resources/app/out/vs/workbench/workbench.html',
+            'resources/app/out/vs/code/electron-browser/workbench/workbench.html',
+            'resources/app/out/vs/code/electron-main/workbench.html'
+        ];
+        return subPaths.some(sub => fs.existsSync(path.join(dir, sub)));
     } catch { return false; }
 }
 
@@ -375,10 +379,21 @@ function main() {
     console.log(`📦 Version: ${getVersion(basePath)}`);
     console.log('');
 
-    const files = [
+    const candidates = [
+        { path: path.join(basePath, 'resources', 'app', 'out', 'vs', 'code', 'electron-browser', 'workbench', 'workbench.js'), label: 'workbench' },
         { path: path.join(basePath, 'resources', 'app', 'out', 'vs', 'workbench', 'workbench.desktop.main.js'), label: 'workbench' },
+        { path: path.join(basePath, 'resources', 'app', 'out', 'vs', 'code', 'electron-browser', 'workbench', 'jetskiAgent.js'), label: 'jetskiAgent' },
         { path: path.join(basePath, 'resources', 'app', 'out', 'jetskiAgent', 'main.js'), label: 'jetskiAgent' },
     ];
+
+    const seen = new Set();
+    const files = candidates.filter(f => {
+        if (fs.existsSync(f.path) && !seen.has(f.label)) {
+            seen.add(f.label);
+            return true;
+        }
+        return false;
+    });
 
     switch (action) {
         case 'check':

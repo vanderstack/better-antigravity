@@ -42,6 +42,34 @@
     "better-antigravity": "cli.js"
   },
   "contributes": {
+    "configuration": {
+      "title": "Better Antigravity",
+      "properties": {
+        "better-antigravity.telegram.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the integrated Telegram bot bridge."
+        },
+        "better-antigravity.telegram.botToken": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram Bot Token from @BotFather."
+        },
+        "better-antigravity.telegram.allowedUserIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of authorized Telegram User IDs."
+        },
+        "better-antigravity.telegram.logMessages": {
+          "type": "boolean",
+          "default": true,
+          "description": "Log received Telegram messages to the Better Antigravity output channel."
+        }
+      }
+    },
     "commands": [
       {
         "command": "better-antigravity.status",
@@ -50,6 +78,38 @@
       {
         "command": "better-antigravity.revertAutoRun",
         "title": "Better Antigravity: Revert Auto-Run Fix"
+      },
+      {
+        "command": "antigravity-bridge.sendMessage",
+        "title": "Better Antigravity: Send Message (Bridge)"
+      },
+      {
+        "command": "antigravity-bridge.sayHello",
+        "title": "Better Antigravity: Say Hello (Bridge)"
+      },
+      {
+        "command": "better-antigravity.telegram.setToken",
+        "title": "Better Antigravity: Set Telegram Bot Token"
+      },
+      {
+        "command": "better-antigravity.telegram.toggle",
+        "title": "Better Antigravity: Toggle Telegram Bot"
+      },
+      {
+        "command": "better-antigravity.telegram.addUser",
+        "title": "Better Antigravity: Add Telegram Allowed User"
+      },
+      {
+        "command": "better-antigravity.telegram.removeUser",
+        "title": "Better Antigravity: Remove Telegram Allowed User"
+      },
+      {
+        "command": "better-antigravity.telegram.showLogs",
+        "title": "Better Antigravity: Show Telegram Message Logs"
+      },
+      {
+        "command": "better-antigravity.forceReload",
+        "title": "Better Antigravity: Force Reload (Hot-Swap)"
       }
     ]
   },
@@ -85,10 +145,13 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "chokidar": "^5.0.0",
     "esbuild": "^0.20.0"
   },
   "dependencies": {
+    "@grammyjs/runner": "^2.0.3",
     "antigravity-sdk": "^1.5.0",
+    "grammy": "^1.41.1",
     "sql.js": "^1.14.0"
   }
 }

@@ -10,30 +10,51 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { AntigravitySDK } from 'antigravity-sdk';
-import { getWorkbenchDir, getTargetFiles, isPatched, revertAll } from './auto-run';
+import { getWorkbenchDir, getBundleDir, getTargetFiles, isPatched, revertAll } from './auto-run';
 
 /**
  * Show extension status in the output channel.
  */
-export async function status(sdk: AntigravitySDK | null, output: vscode.OutputChannel): Promise<void> {
+export async function status(sdk: AntigravitySDK | null, botManager: any, output: vscode.OutputChannel): Promise<void> {
     const lines = [
         '=== Better Antigravity ===',
         '',
         `SDK:     ${sdk?.isInitialized ? `v${sdk.version}` : 'not initialized'}`,
-        `LS:      ${sdk?.ls?.isReady ? `port ${sdk.ls.port}` : 'not ready'}`,
+        `LS:      ${sdk?.ls?.isReady ? `port ${sdk.ls.port} (CSRF: ${sdk.ls.hasCsrfToken ? 'found' : 'missing'})` : 'not ready'}`,
         `UI:      ${sdk?.integration.isInstalled() ? 'installed' : 'not installed'}`,
         `Titles:  ${sdk?.integration.titles.count ?? 0} custom`,
     ];
 
-    const dir = getWorkbenchDir();
-    if (dir) {
-        const files = getTargetFiles(dir);
+    if (sdk?.ls?.isReady) {
+        try {
+            output.appendLine('Testing LS connection...');
+            await sdk.ls.getUserStatus();
+            lines.splice(4, 0, `LS Auth: OK (Connection successful)`);
+        } catch (err: any) {
+            lines.splice(4, 0, `LS Auth: FAILED - ${err.message}`);
+        }
+    }
+
+    if (botManager) {
+        const metrics = botManager.getBridgeMetrics();
+        if (metrics) {
+            lines.push('', '--- Telegram Bridge ---');
+            lines.push(`Outbox:  ${metrics.outbox}`);
+            lines.push(`Pending: ${metrics.pending}`);
+            lines.push(`Archive: ${metrics.archive} ${metrics.archive > 500 ? '⚠️ (Large)' : ''}`);
+            lines.push(`Errors:  ${metrics.error} ${metrics.error > 0 ? '❌' : ''}`);
+        }
+    }
+
+    const bundleDir = getBundleDir();
+    if (bundleDir) {
+        const files = getTargetFiles(bundleDir);
         for (const f of files) {
             const patched = await isPatched(f.path);
             lines.push(`AutoRun: ${f.label} = ${patched ? 'fixed' : 'not fixed'}`);
         }
     } else {
-        lines.push('AutoRun: workbench directory not found');
+        lines.push('AutoRun: bundle directory not found');
     }
 
     output.appendLine(lines.join('\n'));
@@ -47,9 +68,9 @@ export async function status(sdk: AntigravitySDK | null, output: vscode.OutputCh
  * from being loaded by Electron (which causes grey screen).
  */
 export async function revertAutoRun(): Promise<void> {
-    const dir = getWorkbenchDir();
+    const dir = getBundleDir();
     if (!dir) {
-        vscode.window.showErrorMessage('Workbench directory not found.');
+        vscode.window.showErrorMessage('Bundle directory not found.');
         return;
     }
 
@@ -58,11 +79,19 @@ export async function revertAutoRun(): Promise<void> {
 
     if (reverted > 0) {
         // Clear V8 Code Cache — stale cache after revert causes grey screen
-        const appData = process.env.APPDATA || '';
+        let cacheBaseDir: string;
+        if (process.platform === 'win32') {
+            cacheBaseDir = path.join(process.env.APPDATA || '', 'Antigravity');
+        } else if (process.platform === 'darwin') {
+            cacheBaseDir = path.join(process.env.HOME || '', 'Library', 'Application Support', 'Antigravity');
+        } else {
+            cacheBaseDir = path.join(process.env.HOME || '', '.config', 'Antigravity');
+        }
+
         const cacheDirs = [
-            path.join(appData, 'Antigravity', 'CachedData'),
-            path.join(appData, 'Antigravity', 'GPUCache'),
-            path.join(appData, 'Antigravity', 'Code Cache'),
+            path.join(cacheBaseDir, 'CachedData'),
+            path.join(cacheBaseDir, 'GPUCache'),
+            path.join(cacheBaseDir, 'Code Cache'),
         ];
         for (const d of cacheDirs) {
             try { await fsp.rm(d, { recursive: true, force: true }); } catch { /* may not exist */ }
@@ -77,5 +106,119 @@ export async function revertAutoRun(): Promise<void> {
         }
     } else {
         vscode.window.showInformationMessage('No backups found. Nothing to revert.');
+    }
+}
+
+/**
+ * Legacy Bridge: Test command to send a specific message to inbox.json.
+ */
+export async function sendMessageCommand(): Promise<void> {
+    const text = await vscode.window.showInputBox({
+        prompt: "Enter a message to send to the Antigravity Agent",
+        placeHolder: "e.g., Explain the selected code"
+    });
+    
+    if (text) {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        let inboxPath: string;
+        if (workspaceFolders && workspaceFolders.length > 0) {
+            inboxPath = path.join(workspaceFolders[0].uri.fsPath, 'inbox.json');
+        } else {
+            // Context is not available here easily, so use home dir as global fallback
+            inboxPath = path.join(process.env.HOME || process.env.USERPROFILE || '', '.antigravity-inbox.json');
+        }
+
+        await fsp.writeFile(inboxPath, JSON.stringify({ text }));
+        vscode.window.showInformationMessage(`Message written to ${inboxPath}`);
+    }
+}
+
+/**
+ * Legacy Bridge: Test command to say hello.
+ */
+export async function sayHelloCommand(): Promise<void> {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    let inboxPath: string;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        inboxPath = path.join(workspaceFolders[0].uri.fsPath, 'inbox.json');
+    } else {
+        inboxPath = path.join(process.env.HOME || process.env.USERPROFILE || '', '.antigravity-inbox.json');
+    }
+    const text = "Hello from Better Antigravity Bridge!";
+    await fsp.writeFile(inboxPath, JSON.stringify({ text }));
+    vscode.window.showInformationMessage(`Hello message written to ${inboxPath}`);
+}
+
+/**
+ * Commands for Telegram Bot Configuration
+ */
+
+export async function setTelegramToken(): Promise<void> {
+    const config = vscode.workspace.getConfiguration('better-antigravity.telegram');
+    const currentToken = config.get<string>('botToken') || "";
+    
+    const token = await vscode.window.showInputBox({
+        prompt: "Enter your Telegram Bot Token from @BotFather",
+        value: currentToken,
+        password: true
+    });
+
+    if (token !== undefined) {
+        await config.update('botToken', token, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(`Telegram Bot Token ${token ? 'updated' : 'cleared'}.`);
+    }
+}
+
+export async function toggleTelegramBot(): Promise<void> {
+    const config = vscode.workspace.getConfiguration('better-antigravity.telegram');
+    const enabled = config.get<boolean>('enabled');
+    
+    await config.update('enabled', !enabled, vscode.ConfigurationTarget.Global);
+    vscode.window.showInformationMessage(`Telegram Bot ${!enabled ? 'enabled' : 'disabled'}.`);
+}
+
+export async function addTelegramUser(): Promise<void> {
+    const config = vscode.workspace.getConfiguration('better-antigravity.telegram');
+    const allowedUsers = config.get<string[]>('allowedUserIds') || [];
+    
+    const userId = await vscode.window.showInputBox({
+        prompt: "Enter Telegram User ID to allow (e.g. 123456789)",
+        placeHolder: "User ID"
+    });
+
+    if (userId && !allowedUsers.includes(userId)) {
+        const newUsers = [...allowedUsers, userId];
+        await config.update('allowedUserIds', newUsers, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(`User ID ${userId} added to allowed list.`);
+    } else if (userId) {
+        vscode.window.showWarningMessage(`User ID ${userId} is already in the allowed list.`);
+    }
+}
+
+export async function removeTelegramUser(): Promise<void> {
+    const config = vscode.workspace.getConfiguration('better-antigravity.telegram');
+    const allowedUsers = config.get<string[]>('allowedUserIds') || [];
+    
+    if (allowedUsers.length === 0) {
+        vscode.window.showInformationMessage("No users in the allowed list.");
+        return;
+    }
+
+    const userId = await vscode.window.showQuickPick(allowedUsers, {
+        placeHolder: "Select a Telegram User ID to remove"
+    });
+
+    if (userId) {
+        const newUsers = allowedUsers.filter(id => id !== userId);
+        await config.update('allowedUserIds', newUsers, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(`User ID ${userId} removed from allowed list.`);
+    }
+}
+
+export async function showTelegramLogs(manager: any): Promise<void> {
+    if (manager) {
+        manager.showLogs();
+    } else {
+        vscode.window.showWarningMessage("Telegram Bot manager not initialized.");
     }
 }
