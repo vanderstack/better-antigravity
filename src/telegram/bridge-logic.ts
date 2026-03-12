@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Bot } from 'grammy';
+import * as chokidar from 'chokidar';
 
 export interface QueuedMessage {
     chat_id?: number;
@@ -12,7 +13,8 @@ export interface QueuedMessage {
 }
 
 export class TelegramBridgeManager {
-    private watcher: fs.FSWatcher | null = null;
+    private watcher: any = null;
+    private heartbeatInterval: NodeJS.Timeout | null = null;
     private cleanupInterval: NodeJS.Timeout | null = null;
     private isProcessing = false;
 
@@ -35,20 +37,34 @@ export class TelegramBridgeManager {
     }
 
     public async start() {
-        this.log('Starting Telegram Bridge Manager...');
+        this.log('Starting Telegram Bridge Manager (Reliability Mode)...');
         
         // Initial sweep
         await this.scanOutbox();
 
-        // Start watching
-        this.watcher = fs.watch(path.join(this.baseDir, 'outbox'), (event, filename) => {
-            if (filename && filename.endsWith('.json')) {
+        // 1. Chokidar Watcher
+        this.watcher = chokidar.watch(path.join(this.baseDir, 'outbox'), {
+            ignoreInitial: true,
+            depth: 0,
+            awaitWriteFinish: {
+                stabilityThreshold: 100,
+                pollInterval: 50
+            }
+        });
+
+        this.watcher.on('add', (filePath: string) => {
+            if (filePath.endsWith('.json')) {
                 this.scanOutbox();
             }
         });
 
-        // Setup cleanup (hourly)
-        this.cleanupInterval = setInterval(() => this.cleanupArchive(), 3600000);
+        // 2. 1s Heartbeat Poll (Convergence)
+        this.heartbeatInterval = setInterval(() => {
+            this.scanOutbox();
+        }, 1000);
+
+        // 3. Cleanup (Every 5 minutes for faster rotation)
+        this.cleanupInterval = setInterval(() => this.cleanupArchive(), 300000);
         this.cleanupArchive(); // Initial cleanup
     }
 
@@ -56,6 +72,10 @@ export class TelegramBridgeManager {
         if (this.watcher) {
             this.watcher.close();
             this.watcher = null;
+        }
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
         }
         if (this.cleanupInterval) {
             clearInterval(this.cleanupInterval);
@@ -70,6 +90,8 @@ export class TelegramBridgeManager {
 
         try {
             const outboxPath = path.join(this.baseDir, 'outbox');
+            if (!fs.existsSync(outboxPath)) return;
+            
             const files = fs.readdirSync(outboxPath).filter(f => f.endsWith('.json'));
 
             for (const file of files) {
@@ -88,6 +110,7 @@ export class TelegramBridgeManager {
 
         try {
             // Atomic move to pending
+            if (!fs.existsSync(outPath)) return;
             fs.renameSync(outPath, pendingPath);
             
             this.log(`Processing message: ${filename}`);
@@ -112,7 +135,7 @@ export class TelegramBridgeManager {
                 parse_mode: data.parse_mode || 'Markdown'
             });
 
-            // If there's an attachment, handle separately (stub for now, but infrastructure is here)
+            // Handle attachment
             if (data.attachment_path) {
                 await this.handleAttachment(data);
             }
@@ -161,8 +184,6 @@ export class TelegramBridgeManager {
                 fileToSend = Buffer.from(b64, 'base64');
             }
 
-            // Note: We use the generic sendDocument for simplicity and maximum file type support
-            // but you could branch to sendPhoto or sendVideo based on extension.
             const { InputFile } = require('grammy');
             await this.bot.api.sendDocument(data.chat_id, new InputFile(fileToSend, path.basename(fullPath)));
             this.log(`Attachment sent: ${path.basename(fullPath)}`);
@@ -177,6 +198,7 @@ export class TelegramBridgeManager {
         const archiveDir = path.join(this.baseDir, 'archive');
 
         try {
+            if (!fs.existsSync(archiveDir)) return;
             const files = fs.readdirSync(archiveDir);
             let count = 0;
             for (const file of files) {
@@ -194,13 +216,17 @@ export class TelegramBridgeManager {
     }
 
     public getStatusMetircs() {
-        const metrics = {
-            outbox: fs.readdirSync(path.join(this.baseDir, 'outbox')).length,
-            pending: fs.readdirSync(path.join(this.baseDir, 'pending')).length,
-            archive: fs.readdirSync(path.join(this.baseDir, 'archive')).length,
-            error: fs.readdirSync(path.join(this.baseDir, 'error')).length
-        };
-        return metrics;
+        try {
+            const metrics = {
+                outbox: fs.readdirSync(path.join(this.baseDir, 'outbox')).length,
+                pending: fs.readdirSync(path.join(this.baseDir, 'pending')).length,
+                archive: fs.readdirSync(path.join(this.baseDir, 'archive')).length,
+                error: fs.readdirSync(path.join(this.baseDir, 'error')).length
+            };
+            return metrics;
+        } catch {
+            return { outbox: 0, pending: 0, archive: 0, error: 0 };
+        }
     }
 
     private log(msg: string) {

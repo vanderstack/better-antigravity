@@ -110,6 +110,14 @@
       {
         "command": "better-antigravity.forceReload",
         "title": "Better Antigravity: Force Reload (Hot-Swap)"
+      },
+      {
+        "command": "better-antigravity.probeSDK",
+        "title": "Better Antigravity: Probe SDK"
+      },
+      {
+        "command": "better-antigravity.openDiagnostics",
+        "title": "Better Antigravity: Open Diagnostics Folder"
       }
     ]
   },

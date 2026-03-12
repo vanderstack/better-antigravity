@@ -19,13 +19,16 @@ import {
     toggleTelegramBot,
     addTelegramUser,
     removeTelegramUser,
-    showTelegramLogs
+    showTelegramLogs,
+    probeSDK
 } from './commands';
 import { initializeBridge } from './bridge';
 import { initializeTelegramBot } from './telegram/bot';
+import { TracingManager } from './tracing';
 
 let sdk: AntigravitySDK | null = null;
 let botManager: any = null;
+let tracing: TracingManager;
 let output: vscode.OutputChannel;
 let engineDisposables: vscode.Disposable[] = [];
 
@@ -39,6 +42,8 @@ export async function start(context: vscode.ExtensionContext) {
     output = vscode.window.createOutputChannel('Better Antigravity');
     engineDisposables.push(output);
     log('Engine starting...');
+
+    tracing = new TracingManager(context);
 
     // Set SDK Log Level to Info to see RPC calls in console
     Logger.setLevel(LogLevel.Info);
@@ -55,6 +60,10 @@ export async function start(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('better-antigravity.telegram.addUser', addTelegramUser),
         vscode.commands.registerCommand('better-antigravity.telegram.removeUser', removeTelegramUser),
         vscode.commands.registerCommand('better-antigravity.telegram.showLogs', () => showTelegramLogs(botManager)),
+        vscode.commands.registerCommand('better-antigravity.probeSDK', () => probeSDK(sdk, output)),
+        vscode.commands.registerCommand('better-antigravity.openDiagnostics', () => {
+            vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(tracing.getDiagnosticDir()), true);
+        }),
     );
 
     // ── Auto-Run Fix (async, non-blocking, no prompt) ─────────────────
@@ -90,7 +99,7 @@ export async function start(context: vscode.ExtensionContext) {
         sdk.integration.enableAutoRepair();
 
         // Initialize Telegram Bot
-        botManager = await initializeTelegramBot(sdk, context, output);
+        botManager = await initializeTelegramBot(sdk, context, output, tracing);
 
         const version = path.basename(path.dirname(__filename));
         await botManager.notifyLifecycle(`🚀 *Engine Started*\nVersion: \`${version}\``);

@@ -6,6 +6,7 @@ import { AntigravityBridge } from './engine-bridge';
 import { authMiddleware, setupHandlers } from './handlers';
 import { AntigravitySDK } from 'antigravity-sdk';
 import { TelegramBridgeManager } from './bridge-logic';
+import { TracingManager } from '../tracing';
 
 /**
  * TelegramBotManager - Orchestrates the lifecycle of the Telegram Bot within VS Code.
@@ -17,8 +18,15 @@ export class TelegramBotManager {
     private runner: any = null;
     private bridge: AntigravityBridge | null = null;
     private bridgeManager: TelegramBridgeManager | null = null;
+    private tracing: TracingManager | null = null;
 
-    constructor(private readonly sdk: AntigravitySDK, private readonly output: vscode.OutputChannel) {}
+    constructor(
+        private readonly sdk: AntigravitySDK,
+        private readonly output: vscode.OutputChannel,
+        tracing?: TracingManager
+    ) {
+        this.tracing = tracing || null;
+    }
 
     /**
      * Starts the bot if enabled in settings. 
@@ -45,7 +53,7 @@ export class TelegramBotManager {
 
         try {
             this.bot = new Bot(token);
-            this.bridge = new AntigravityBridge(this.sdk);
+            this.bridge = new AntigravityBridge(this.sdk, this.tracing || undefined);
 
             // Initialize the High-Reliability Queue Bridge
             const bridgePath = config.get<string>('bridgePath') || '/config/gravity-claw/telegram_bridge';
@@ -142,8 +150,8 @@ let botManager: TelegramBotManager | null = null;
 /**
  * Entry point for the extension to initialize the Telegram bot.
  */
-export async function initializeTelegramBot(sdk: AntigravitySDK, context: vscode.ExtensionContext, output: vscode.OutputChannel) {
-    botManager = new TelegramBotManager(sdk, output);
+export async function initializeTelegramBot(sdk: AntigravitySDK, context: vscode.ExtensionContext, output: vscode.OutputChannel, tracing?: TracingManager) {
+    botManager = new TelegramBotManager(sdk, output, tracing);
     
     // Initial start
     await botManager.start();

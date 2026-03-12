@@ -62,6 +62,52 @@ export async function status(sdk: AntigravitySDK | null, botManager: any, output
 }
 
 /**
+ * Diagnostic probe for testing SDK capabilities.
+ * This is designed to be hot-swapped for rapid iteration.
+ */
+export async function probeSDK(sdk: AntigravitySDK | null, output: vscode.OutputChannel): Promise<void> {
+    if (!sdk) {
+        output.appendLine('[probe] SDK not initialized.');
+        return;
+    }
+
+    output.appendLine('=== SDK Probe Started ===');
+    output.show(true);
+
+    try {
+        // Test 1: Check LS Readiness
+        output.appendLine(`[probe] LS Ready: ${sdk.ls.isReady}`);
+        if (sdk.ls.isReady) {
+            output.appendLine(`[probe] LS Port: ${sdk.ls.port}`);
+            output.appendLine(`[probe] LS CSRF: ${sdk.ls.hasCsrfToken}`);
+        }
+
+        // Test 2: List Cascades (Monitoring current state)
+        const cascades = await sdk.ls.listCascades();
+        const cascadeIds = Object.keys(cascades);
+        output.appendLine(`[probe] Found ${cascadeIds.length} cascades.`);
+        
+        if (cascadeIds.length > 0) {
+            const lastId = cascadeIds[0];
+            output.appendLine(`[probe] Testing injection into cascade: ${lastId.substring(0, 8)}...`);
+            
+            // This is what we iterate on:
+            // Attempt A: Direct ls.sendMessage
+            const ok = await sdk.ls.sendMessage({
+                cascadeId: lastId,
+                text: "Probe: Can you hear me?"
+            });
+            output.appendLine(`[probe] ls.sendMessage result: ${ok}`);
+        }
+
+    } catch (err: any) {
+        output.appendLine(`[probe] ERROR: ${err.message}`);
+    }
+
+    output.appendLine('=== SDK Probe Complete ===');
+}
+
+/**
  * Revert the auto-run fix and prompt for reload.
  *
  * Also clears V8 Code Cache to prevent stale cached patched code

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { AntigravitySDK } from 'antigravity-sdk';
+import { TracingManager } from '../tracing';
 
 export interface TelegramTurnInput {
     text: string;
@@ -21,7 +22,10 @@ export class AntigravityBridge {
     private lastStepCount: Map<string, number> = new Map();
     private onResponseCallback: ((chatId: number, text: string) => void) | null = null;
 
-    constructor(private readonly sdk: AntigravitySDK) {}
+    constructor(
+        private readonly sdk: AntigravitySDK,
+        private readonly tracing?: TracingManager
+    ) {}
 
     /**
      * Forwards a user message from Telegram to the Antigravity Language Server.
@@ -122,6 +126,7 @@ export class AntigravityBridge {
                         const res = await (this.sdk.ls as any).rawRPC('GetConversation', { cascadeId: id });
                         if (res) {
                             log(`[monitor] GetConversation Success (${label})`);
+                            this.tracing?.dumpPayload(`GetConversation_${label}_${id}`, res);
                             return res;
                         }
                     } catch (err: any) {
