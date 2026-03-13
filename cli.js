@@ -16,6 +16,10 @@ const fixes = {
     'auto-run': {
         script: path.join(__dirname, 'fixes', 'auto-run-fix', 'patch.js'),
         description: '"Always Proceed" terminal policy doesn\'t auto-execute commands'
+    },
+    'install': {
+        script: path.join(__dirname, 'fixes', 'install', 'setup.js'),
+        description: 'Install/Symlink this extension into the Antigravity user profile'
     }
 };
 

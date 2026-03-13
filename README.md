@@ -36,18 +36,21 @@ Built specifically for AI agents operating in the IDE:
 ### 1. Standalone SDK Usage
 The `antigravity-sdk` (found in `../antigravity-sdk`) is a standard Node.js library. It **works independently** of this extension and can be imported into any script, CLI tool, or background service to interact with the Antigravity Language Server.
 
-### 2. Extension Installation (Hot-Reload Mode)
-To benefit from hot-reloading and IDE-level features (like the Telegram Bridge), you must symlink the extension into the Antigravity profile:
+### 2. Extension Installation (Recommended)
+To benefit from hot-reloading and IDE-level features (like the Telegram Bridge), you should use the automated installer to symlink the extension into your Antigravity profile:
 
 ```bash
-# 1. Identify your Antigravity config directory (usually ~/.antigravity)
-# 2. Create the symlink (Example for Linux/Cloud environments)
-REPO_PATH="/config/gravity-claw/vendor/better-antigravity"
-EXT_PATH="/config/.antigravity/extensions/better-antigravity"
-
-mkdir -p $(dirname "$EXT_PATH")
-ln -s "$REPO_PATH" "$EXT_PATH"
+# In the vendor/better-antigravity directory:
+npx . install
 ```
+
+This command will:
+- Auto-detect your Antigravity profile (Windows, macOS, or Linux).
+- Create the necessary `extensions/` directory if missing.
+- Symlink the current repository into the IDE.
+- Verify the presence of the peer `antigravity-sdk`.
+
+After running the installer, perform a **Full Window Reload** (`Developer: Reload Window`) in Antigravity to activate the Host.
 
 ---
 
