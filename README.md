@@ -81,6 +81,7 @@ This extension is optimized for "Full Stream" development where you can modify c
 ## 🔍 Technical Deep Dives
 
 For a deeper look into the internals and version-specific nuances of the project:
+- [Maintenance & Side Effects](./docs/MAINTENANCE.md): Environmental dependencies, build-time coupling, and workspace side effects.
 - [Decoding Protocol](./docs/DECODING_PROTOCOL.md): How we bridge various Antigravity versions and handle formatting.
 - [Fixes Technicals](./FIXES.md): Root cause analysis and methodology for IDE patches.
 
