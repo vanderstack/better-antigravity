@@ -78,5 +78,11 @@ This extension is optimized for "Full Stream" development where you can modify c
 
 ---
 
+## 🔍 Technical Deep Dives
+
+For a deeper look into the internals and version-specific nuances of the project:
+- [Decoding Protocol](./docs/DECODING_PROTOCOL.md): How we bridge various Antigravity versions and handle formatting.
+- [Fixes Technicals](./FIXES.md): Root cause analysis and methodology for IDE patches.
+
 ## 📜 Legal
 See [LICENSE](./LICENSE) and [LEGAL.md](./LEGAL.md) for details on the AGPL-3.0 license and Antigravity SDK usage.
