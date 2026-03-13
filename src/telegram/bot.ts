@@ -25,6 +25,7 @@ export class TelegramBotManager {
 
     constructor(
         private readonly sdk: AntigravitySDK,
+        private readonly context: vscode.ExtensionContext,
         private readonly output: vscode.OutputChannel,
         tracing?: TracingManager
     ) {
@@ -56,7 +57,17 @@ export class TelegramBotManager {
 
         try {
             this.bot = new Bot(token);
-            const bridgePath = config.get<string>('bridgePath') || '/config/gravity-claw/telegram_bridge';
+            
+            // Priority: Configured bridgePath > globalStorageUri > legacy /config/ path
+            let bridgePath = config.get<string>('bridgePath');
+            if (!bridgePath) {
+                bridgePath = this.context.globalStorageUri.fsPath;
+                // Pre-flight check for the storage dir
+                if (!fs.existsSync(bridgePath)) {
+                    fs.mkdirSync(bridgePath, { recursive: true });
+                }
+            }
+
             this.bridge = new AntigravityBridge(this.sdk, bridgePath, this.tracing || undefined);
 
             // Auth Middleware
@@ -231,8 +242,9 @@ export class TelegramBotManager {
         const ts = new Date().toISOString().substring(11, 19);
         this.output.appendLine(`[telegram] [${ts}] ${msg}`);
         try {
-            const fs = require('fs');
-            fs.appendFileSync('/config/gravity-claw/telegram_bridge_debug.log', `[${ts}] [telegram] ${msg}\n`);
+            // Persistent log if needed
+            // const fs = require('fs');
+            // fs.appendFileSync(path.join(this.context.globalStorageUri.fsPath, 'telegram_debug.log'), `[${ts}] [telegram] ${msg}\n`);
         } catch {}
     }
 }
@@ -243,7 +255,7 @@ let botManager: TelegramBotManager | null = null;
  * Entry point for the extension to initialize the Telegram bot.
  */
 export async function initializeTelegramBot(sdk: AntigravitySDK, context: vscode.ExtensionContext, output: vscode.OutputChannel, tracing?: TracingManager) {
-    botManager = new TelegramBotManager(sdk, output, tracing);
+    botManager = new TelegramBotManager(sdk, context, output, tracing);
     
     // Initial start
     await botManager.start();

@@ -36,11 +36,14 @@ export class BridgeEventBus extends EventEmitter {
     }
 
     public emitEvent(event: BridgeEvent) {
-        // Fire and forget to the file system queue
+        // Fire and forget to the file system queue (Persistence)
         this.publishToFile(event);
         
-        // Also persist to the debug log as before
+        // Also persist to the debug log
         this.persistToLog(event);
+
+        // Immediate dispatch for local Sagas
+        this.dispatchInternal(event);
     }
 
     /**

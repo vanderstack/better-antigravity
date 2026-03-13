@@ -268,3 +268,33 @@ export async function showTelegramLogs(manager: any): Promise<void> {
         vscode.window.showWarningMessage("Telegram Bot manager not initialized.");
     }
 }
+
+/**
+ * Internal command for agents to send events directly to the bridge.
+ * This bypasses the file system outbox.
+ */
+export async function sendEvent(event: any): Promise<void> {
+    try {
+        const { BridgeEventBus } = require('./telegram/events');
+        const bus = BridgeEventBus.getInstance();
+        bus.emitEvent(event);
+    } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to send bridge event: ${err.message}`);
+    }
+}
+
+/**
+ * Returns the bundled agent documentation (skills) to aid in self-discovery.
+ */
+export async function getAgentDocumentation(context: vscode.ExtensionContext): Promise<string> {
+    try {
+        const docPath = path.join(context.extensionPath, 'dist', '_agent', 'skills', 'telegram-bridge.md');
+        if (fs.existsSync(docPath)) {
+            const content = fs.readFileSync(docPath, 'utf8');
+            return content;
+        }
+        return "No agent documentation found for this extension.";
+    } catch (err: any) {
+        return `Error retrieving documentation: ${err.message}`;
+    }
+}

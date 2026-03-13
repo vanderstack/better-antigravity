@@ -83,6 +83,12 @@ async function buildEngine() {
         console.error('Build failed. Staging directory preserved for debugging or cleaned.');
         throw err;
     }
+
+    // Copy Agent Skills to dist for bundling
+    console.log('Bundling Agent Skills...');
+    const agentDir = path.join('dist', '_agent');
+    if (fs.existsSync(agentDir)) fs.rmSync(agentDir, { recursive: true, force: true });
+    fs.cpSync('_agent', agentDir, { recursive: true });
 }
 
 // Ensure dist exists

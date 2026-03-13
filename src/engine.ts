@@ -20,7 +20,9 @@ import {
     addTelegramUser,
     removeTelegramUser,
     showTelegramLogs,
-    probeSDK
+    probeSDK,
+    sendEvent,
+    getAgentDocumentation
 } from './commands';
 import { initializeBridge } from './bridge';
 import { initializeTelegramBot } from './telegram/bot';
@@ -35,6 +37,11 @@ let engineDisposables: vscode.Disposable[] = [];
 function log(msg: string): void {
     const ts = new Date().toISOString().substring(11, 19);
     output?.appendLine(`[${ts}] ${msg}`);
+    try {
+        // Log to telemetry or persistent storage if needed
+        // const fs = require('fs');
+        // fs.appendFileSync(path.join(context.globalStorageUri.fsPath, 'bridge_debug.log'), `[${ts}] ${msg}\n`);
+    } catch {}
 }
 
 export async function start(context: vscode.ExtensionContext) {
@@ -61,6 +68,8 @@ export async function start(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('better-antigravity.telegram.removeUser', removeTelegramUser),
         vscode.commands.registerCommand('better-antigravity.telegram.showLogs', () => showTelegramLogs(botManager)),
         vscode.commands.registerCommand('better-antigravity.probeSDK', () => probeSDK(sdk, output)),
+        vscode.commands.registerCommand('better-antigravity.telegram.sendEvent', sendEvent),
+        vscode.commands.registerCommand('better-antigravity.getAgentDocumentation', () => getAgentDocumentation(context)),
         vscode.commands.registerCommand('better-antigravity.openDiagnostics', () => {
             vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(tracing.getDiagnosticDir()), true);
         }),
@@ -104,6 +113,9 @@ export async function start(context: vscode.ExtensionContext) {
         const version = path.basename(path.dirname(__filename));
         await botManager.notifyLifecycle(`🚀 *Engine Started*\nVersion: \`${version}\``);
 
+        // Agentic Discovery Injection
+        await injectAgentSkills(context);
+
         log('Engine Active');
     } catch (err: any) {
         log(`SDK init failed: ${err.message}`);
@@ -125,4 +137,36 @@ export async function stop() {
         try { d.dispose(); } catch {}
     }
     engineDisposables = [];
+}
+
+/**
+ * Automatically injects the extension's agent skills into the workspace for discovery.
+ */
+async function injectAgentSkills(context: vscode.ExtensionContext) {
+    try {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) return;
+
+        const root = workspaceFolders[0].uri.fsPath;
+        const skillTargetDir = path.join(root, '.agents', 'skills');
+        const skillTargetFile = path.join(skillTargetDir, 'better-antigravity.md');
+        const skillSourceFile = path.join(context.extensionPath, 'dist', '_agent', 'skills', 'telegram-bridge.md');
+
+        if (!fs.existsSync(skillSourceFile)) return;
+
+        if (!fs.existsSync(skillTargetDir)) {
+            fs.mkdirSync(skillTargetDir, { recursive: true });
+        }
+
+        // Always overwrite or only if missing? 
+        // For discovery, "if missing" is safer, but "always" ensures latest docs.
+        // Let's go with "if missing" to avoid noisy git changes for the user.
+        if (!fs.existsSync(skillTargetFile)) {
+            fs.copyFileSync(skillSourceFile, skillTargetFile);
+            const ts = new Date().toISOString().substring(11, 19);
+            console.log(`[${ts}] [discovery] Injected agent skill into workspace: ${skillTargetFile}`);
+        }
+    } catch (err: any) {
+        console.error(`[discovery] Failed to inject agent skills: ${err.message}`);
+    }
 }

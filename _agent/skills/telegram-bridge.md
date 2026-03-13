@@ -9,16 +9,25 @@ This skill provides instructions for sending Telegram messages and attachments t
 
 ## Quick Start (Recommended)
 
-The easiest way to send a message is to use the provided Python helper script. This handles the JSON formatting, unique filenames, and attachment copying for you.
+The most reliable way to send a message is via the extension's internal command. This works even if the file system is restricted.
 
-### 1. Send Simple Text
-```bash
-python3 /config/gravity-claw/telegram_bridge/bin/send_telegram.py --text "Hello from the agent!"
+### 1. Send via Extension API (Recommended)
+```typescript
+// Replace with your tool's command execution mechanism
+vscode.commands.executeCommand('better-antigravity.telegram.sendEvent', {
+    type: 'OUTBOUND_MESSAGE',
+    timestamp: Date.now(),
+    data: { 
+        text: "Hello from the agent via Native API!",
+        parse_mode: "Markdown" // Optional: "Markdown" or "HTML"
+    }
+});
 ```
 
-### 2. Send with Attachment
+### 2. Legacy Python Helper
+If you prefer the command line or are outside the IDE context:
 ```bash
-python3 /config/gravity-claw/telegram_bridge/bin/send_telegram.py --text "Here is the log" --attach "/tmp/build.log"
+python3 /config/gravity-claw/telegram_bridge/bin/send_telegram.py --text "Hello from the CLI!"
 ```
 
 ---
