@@ -1,70 +1,92 @@
-# Better Antigravity Extension
+# Better Antigravity Extension 🚀
 
-A high-performance, developer-centric extension for the Antigravity IDE, designed for rapid debugging, reliable messaging, and deep SDK visibility.
-
-## Key Features
-
-- **🚀 Progressive Hot-Reloading**: Change extension logic (the "Engine") and see updates in real-time without restarting the IDE.
-- **🛡️ Hardened Reliability**: Multi-layered watchers (Chokidar + Polling) ensure no reload or message events are missed, even under heavy filesystem load.
-- **📡 Reliable Telegram Bridge**: A high-integrity queue system (`outbox` -> `pending` -> `archive`) for bidirectional communication between the agent and Telegram.
-- **🔍 SDK Diagnostic Tracing**: Automatically capture and dump raw SDK payloads to disk for deep protocol analysis.
-- **🤖 Agent SKILL Integration**: Pre-built instructions and CLI helpers for other agents to use the system.
+**Better Antigravity** is the "Bedrock" of the Gravity Claw ecosystem. It is a developer-centric extension for the Antigravity IDE, designed for rapid prototyping, deep protocol visibility, and high-reliability agentic communication.
 
 ---
 
-## Installation (Developer Mode)
+## 🛠 Features
 
-To install the extension, symlink this repository into your Antigravity extensions folder:
+### 1. Progressive Hot-Reload Engine
+The extension is built with a dual-layer architecture:
+- **The Host (Resident)**: A thin loader that stays active in the IDE.
+- **The Engine (Hot-Swap)**: The core logic that can be re-bundled and swapped in milliseconds without restarting the IDE.
+- **Reliability**: Uses a Chokidar-backed watcher with a 5s convergence poll to ensure zero-loss activation of new versions.
 
-```bash
-# Define paths
-REPO_PATH="/config/gravity-claw/vendor/better-antigravity"
-EXT_PATH="/config/.antigravity/extensions/better-antigravity"
+### 2. Consolidated Telegram Bridge
+A high-integrity messaging gateway that bridges the isolation between the IDE and Telegram:
+- **Event-Sourced**: Every action is a durable event stored in standard VS Code storage.
+- **Command API**: Exposes `better-antigravity.telegram.sendEvent` for direct interaction.
+- **Turn Settling**: Intelligent idle detection to capture final assistant responses.
 
-# Create symlink
-ln -s "$REPO_PATH" "$EXT_PATH"
+### 3. SDK Protocol Probing & Tracing
+Integrated deep-hooks into the Antigravity Language Server:
+- **Trace Dumps**: Raw RPC payloads are captured to `.antigravity-diagnostics/`.
+- **Live Probes**: Use `Better Antigravity: Probe SDK` to test LS capabilities in real-time.
+- **Seamless Install**: Automated injection of title proxies and maintenance scripts.
+
+### 4. Agentic Self-Discovery 🤖
+Built specifically for AI agents operating in the IDE:
+- **Skill Injection**: Automatically injects `.agents/skills/better-antigravity.md` into any workspace on startup.
+- **Doc Command**: Agents can call `better-antigravity.getAgentDocumentation` to self-onboard.
+
+---
+
+## 📦 Installation
+
+### Developer Setup (Hot-Reload Mode)
+1. **Clone & Link**:
+   ```bash
+   REPO_PATH="/path/to/better-antigravity"
+   EXT_PATH="/config/.antigravity/extensions/better-antigravity"
+   ln -s "$REPO_PATH" "$EXT_PATH"
+   ```
+2. **First Run**: Reload the window (`Cmd+R` or `Developer: Reload Window`).
+3. **Build Pipeline**:
+   ```bash
+   npm run build  # Triggers Host to swap to the new Engine version
+   ```
+
+---
+
+## 📡 Telegram Bridge Integration
+
+### For AI Agents (Recommended)
+Use the extension's native API for the most reliable delivery:
+```typescript
+vscode.commands.executeCommand('better-antigravity.telegram.sendEvent', {
+    type: 'OUTBOUND_MESSAGE',
+    timestamp: Date.now(),
+    data: { text: "Hello from the agent!" }
+});
 ```
 
-After symlinking, perform a **Full Window Reload** (`Developer: Reload Window`) in VS Code to activate the Host loader.
+### Configuration
+Configure the following in VS Code Settings (`Ctrl+,`):
+- `better-antigravity.telegram.botToken`: Your token from @BotFather.
+- `better-antigravity.telegram.allowedUserIds`: Whitelist of Telegram IDs.
+- `better-antigravity.telegram.enabled`: Toggle the bridge on/off.
 
 ---
 
-## Usage & Build Pipeline
+## 🧪 Prototyping & SDK Probing
 
-The extension is split into two layers:
-1. **The Host**: Stays resident in the IDE. It watches for new builds and safely swaps the logic.
-2. **The Engine**: Contains the actual extension features. This is what you hot-swap.
-
-### Building
-To apply changes and trigger a hot-swap:
-```bash
-npm run build
-```
-The Host will detect the new build in `dist/reloads/` and perform a safe swap automatically.
+The extension is designed for rapid iteration on the Antigravity protocol:
+1. **Modify** `src/engine.ts` or add handlers in `src/commands.ts`.
+2. **Run** `npm run build`.
+3. **Observe** the update in the `Better Antigravity (Host)` output channel.
+4. **Test** using `Better Antigravity: Probe SDK`.
 
 ---
 
-## Commands
+## 📂 Project Structure
 
-| Command | Description |
-|---------|-------------|
-| **`Better Antigravity: Status`** | Show health metrics for the Engine and the Telegram Bridge. |
-| **`Better Antigravity: Probe SDK`** | Execute diagnostic probes against the Antigravity Language Server. |
-| **`Better Antigravity: Open Diagnostics`** | Reveal the SDK trace folder in the sidebar. |
-| **`Better Antigravity: Force Reload`** | Manually trigger a hot-swap of the latest build. |
-
----
-
-## SDK Tracing
-Raw payloads are dumped to `.antigravity-diagnostics/` in the workspace root.
-- `trace.log`: Daily rotating log of all bridge/SDK events.
-- `GetConversation_*.json`: Raw RPC responses captured during agent turns.
+- `src/host.ts`: Stable bootstrap loader.
+- `src/engine.ts`: Hot-swappable core logic.
+- `src/telegram/`: Consolidated event-sourced bridge.
+- `src/auto-run.ts`: Patches for IDE-level terminal behavior.
+- `_agent/`: Bundled skills for AI agent consumption.
 
 ---
 
-## Telegram Bridge
-Send messages by writing JSON to the queue or using the CLI helper:
-```bash
-python3 scripts/send_telegram.py --text "Hello world"
-```
-For full agent instructions, see [SKILL.md](./_agent/skills/telegram_bridge/SKILL.md).
+## 📜 Legal
+See [LICENSE](./LICENSE) and [LEGAL.md](./LEGAL.md) for details on the AGPL-3.0 license and Antigravity SDK usage.
