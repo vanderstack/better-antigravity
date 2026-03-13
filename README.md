@@ -31,50 +31,37 @@ Built specifically for AI agents operating in the IDE:
 
 ---
 
-## 📦 Installation
+## 📦 Installation & Setup
 
-### Developer Setup (Hot-Reload Mode)
-1. **Clone & Link**:
-   ```bash
-   REPO_PATH="/path/to/better-antigravity"
-   EXT_PATH="/config/.antigravity/extensions/better-antigravity"
-   ln -s "$REPO_PATH" "$EXT_PATH"
-   ```
-2. **First Run**: Reload the window (`Cmd+R` or `Developer: Reload Window`).
-3. **Build Pipeline**:
-   ```bash
-   npm run build  # Triggers Host to swap to the new Engine version
-   ```
+### 1. Standalone SDK Usage
+The `antigravity-sdk` (found in `../antigravity-sdk`) is a standard Node.js library. It **works independently** of this extension and can be imported into any script, CLI tool, or background service to interact with the Antigravity Language Server.
 
----
+### 2. Extension Installation (Hot-Reload Mode)
+To benefit from hot-reloading and IDE-level features (like the Telegram Bridge), you must symlink the extension into the Antigravity profile:
 
-## 📡 Telegram Bridge Integration
+```bash
+# 1. Identify your Antigravity config directory (usually ~/.antigravity)
+# 2. Create the symlink (Example for Linux/Cloud environments)
+REPO_PATH="/config/gravity-claw/vendor/better-antigravity"
+EXT_PATH="/config/.antigravity/extensions/better-antigravity"
 
-### For AI Agents (Recommended)
-Use the extension's native API for the most reliable delivery:
-```typescript
-vscode.commands.executeCommand('better-antigravity.telegram.sendEvent', {
-    type: 'OUTBOUND_MESSAGE',
-    timestamp: Date.now(),
-    data: { text: "Hello from the agent!" }
-});
+mkdir -p $(dirname "$EXT_PATH")
+ln -s "$REPO_PATH" "$EXT_PATH"
 ```
 
-### Configuration
-Configure the following in VS Code Settings (`Ctrl+,`):
-- `better-antigravity.telegram.botToken`: Your token from @BotFather.
-- `better-antigravity.telegram.allowedUserIds`: Whitelist of Telegram IDs.
-- `better-antigravity.telegram.enabled`: Toggle the bridge on/off.
-
 ---
 
-## 🧪 Prototyping & SDK Probing
+## 🧪 The Rapid Prototyping Loop
 
-The extension is designed for rapid iteration on the Antigravity protocol:
-1. **Modify** `src/engine.ts` or add handlers in `src/commands.ts`.
-2. **Run** `npm run build`.
-3. **Observe** the update in the `Better Antigravity (Host)` output channel.
-4. **Test** using `Better Antigravity: Probe SDK`.
+This extension is optimized for "Full Stream" development where you can modify code and see results without state-loss or IDE restarts.
+
+1.  **Activate**: Reload the IDE window once after creating the symlink.
+2.  **Observe**: Open the **Output Channel** and select `Better Antigravity (Host)`.
+3.  **Iterate**: 
+    - Modify `src/engine.ts` (Core logic) or `src/commands.ts` (UI actions).
+    - Run `npm run build` (or `npm run watch`).
+4.  **Confirm**: The Host output will show `[host] Engine swapped to version <TS>`.
+5.  **Test**: Trigger your change via the Command Palette or the `better-antigravity.probeSDK` command.
 
 ---
 
