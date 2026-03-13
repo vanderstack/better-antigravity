@@ -42,14 +42,15 @@ export function setupHandlers(bot: any, bridge: AntigravityBridge, manager: any)
         {
             command: 'start',
             description: 'Show welcome message and instructions',
-            handler: (ctx) => ctx.reply('🚀 *Antigravity Bridge Active*\n\nSend me any prompt, and I will inject it directly into your active VS Code session.', { parse_mode: 'Markdown' })
+            handler: (ctx) => ctx.reply('🚀 <b>Antigravity Bridge Active</b>\n\nSend me any prompt, and I will inject it directly into your active VS Code session.', { parse_mode: 'HTML' })
         },
         {
             command: 'status',
             description: 'Check bridge connection and IDE status',
             handler: async (ctx) => {
                 const sdkStatus = await bridge.getStatus();
-                await ctx.reply(`📊 *Status Report*\n\n*Connection:* ${sdkStatus}`, { parse_mode: 'Markdown' });
+                const safeStatus = sdkStatus.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                await ctx.reply(`📊 <b>Status Report</b>\n\n<b>Connection:</b> ${safeStatus}`, { parse_mode: 'HTML' });
             }
         },
         {
@@ -57,7 +58,7 @@ export function setupHandlers(bot: any, bridge: AntigravityBridge, manager: any)
             description: 'Start a fresh conversation thread',
             handler: async (ctx) => {
                 bridge.resetSession(ctx.chat.id);
-                await ctx.reply('✨ *Session Reset*\n\nThe next message you send will start a fresh conversation.', { parse_mode: 'Markdown' });
+                await ctx.reply('✨ <b>Session Reset</b>\n\nThe next message you send will start a fresh conversation.', { parse_mode: 'HTML' });
             }
         },
         {
@@ -109,15 +110,44 @@ export function setupHandlers(bot: any, bridge: AntigravityBridge, manager: any)
             }
         },
         {
+            command: 'errors',
+            description: 'List failed messages in the error queue',
+            handler: async (ctx) => {
+                const files = manager.getErrorFiles();
+                if (files.length === 0) {
+                    return ctx.reply('✅ <b>No failed messages found.</b>', { parse_mode: 'HTML' });
+                }
+
+                let response = `⚠️ <b>Failed Messages (${files.length}):</b>\n\n`;
+                files.slice(0, 15).forEach((f: string, i: number) => {
+                    response += `${i + 1}. <code>${f}</code>\n`;
+                });
+
+                if (files.length > 15) {
+                    response += `\n...and ${files.length - 15} more.`;
+                }
+
+                await ctx.reply(response, { parse_mode: 'HTML' });
+            }
+        },
+        {
+            command: 'clean_errors',
+            description: 'Purge all failed messages from the error queue',
+            handler: async (ctx) => {
+                const count = manager.clearErrors();
+                await ctx.reply(`🧹 <b>Cleanup Complete:</b> Removed <code>${count}</code> files from the error queue.`, { parse_mode: 'HTML' });
+            }
+        },
+        {
             command: 'help',
             description: 'Show this list of available commands',
             handler: async (ctx) => {
-                let helpText = '🛠️ *Antigravity Bot Help*\n\n';
+                let helpText = '🛠️ <b>Antigravity Bot Help</b>\n\n';
                 commands.forEach(cmd => {
                     helpText += `/${cmd.command} - ${cmd.description}\n`;
                 });
-                helpText += '\n*Any other text:* Forwarded to Antigravity';
-                await ctx.reply(helpText, { parse_mode: 'Markdown' });
+                helpText += '\n<b>Any other text:</b> Forwarded to Antigravity';
+                await ctx.reply(helpText, { parse_mode: 'HTML' });
             }
         }
     ];
@@ -147,14 +177,15 @@ export function setupHandlers(bot: any, bridge: AntigravityBridge, manager: any)
 
         bridge.setSession(chatId, cascadeId);
         await ctx.answerCallbackQuery({ text: `🔄 Switched to conversation ${num}` });
-        await ctx.reply(`🔄 *Switched to conversation:* \`${num}\``, { parse_mode: 'Markdown' });
+        await ctx.reply(`🔄 <b>Switched to conversation:</b> <code>${num}</code>`, { parse_mode: 'HTML' });
     });
 
     // Catch-all for unmatched commands (anything starting with /)
     bot.on('message:text', async (ctx: any, next: NextFunction) => {
         if (ctx.message.text.startsWith('/')) {
             const commandTried = ctx.message.text.split(' ')[0];
-            return ctx.reply(`❓ *Unknown command:* \`${commandTried}\`\n\nRun /help to see all available commands.`, { parse_mode: 'Markdown' });
+            const safeCmd = commandTried.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return ctx.reply(`❓ <b>Unknown command:</b> <code>${safeCmd}</code>\n\nRun /help to see all available commands.`, { parse_mode: 'HTML' });
         }
         return next();
     });
@@ -184,7 +215,9 @@ export function setupHandlers(bot: any, bridge: AntigravityBridge, manager: any)
                 // Fallback for older bot API or if reactor fails
             }
         } catch (err) {
-            await ctx.reply(`❌ *Failed to forward:* ${err instanceof Error ? err.message : String(err)}`, { parse_mode: 'Markdown' });
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const safeErr = errMsg.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            await ctx.reply(`❌ <b>Failed to forward:</b> ${safeErr}`, { parse_mode: 'HTML' });
         }
     });
 }

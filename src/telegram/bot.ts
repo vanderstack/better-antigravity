@@ -5,21 +5,22 @@ import * as path from 'path';
 import { AntigravityBridge } from './engine-bridge';
 import { authMiddleware, setupHandlers } from './handlers';
 import { AntigravitySDK } from 'antigravity-sdk';
-import { TelegramBridgeManager } from './bridge-logic';
 import { TracingManager } from '../tracing';
+import { ReportingSaga } from './saga';
+import { MetadataProjector } from './projector';
+import { EventProcessor } from './event-processor';
 
 /**
  * TelegramBotManager - Orchestrates the lifecycle of the Telegram Bot within VS Code.
- * 
- * It reads configuration from VS Code settings and manages the grammy runner.
  */
 export class TelegramBotManager {
     private bot: Bot | null = null;
     private runner: any = null;
     private bridge: AntigravityBridge | null = null;
-    private bridgeManager: TelegramBridgeManager | null = null;
     private tracing: TracingManager | null = null;
-    private progressMessages: Map<number, number> = new Map(); // chatId -> messageId data
+    private saga: ReportingSaga | null = null;
+    private projector: MetadataProjector | null = null;
+    private processor: EventProcessor | null = null;
     private volatileShortIdMap: Map<number, Map<number, string>> = new Map(); // chatId -> (shortId -> cascadeId)
 
     constructor(
@@ -58,25 +59,35 @@ export class TelegramBotManager {
             const bridgePath = config.get<string>('bridgePath') || '/config/gravity-claw/telegram_bridge';
             this.bridge = new AntigravityBridge(this.sdk, bridgePath, this.tracing || undefined);
 
-            // Initialize the High-Reliability Queue Bridge
-            this.bridgeManager = new TelegramBridgeManager(this.bot, bridgePath, this.output);
-            await this.bridgeManager.start();
-
             // Auth Middleware
             this.bot.use(authMiddleware);
 
             // Setup command and message handlers
             setupHandlers(this.bot, this.bridge, this);
 
+            // Initialize the Event Architecture
+            this.projector = new MetadataProjector();
+            this.projector.setStatePath(bridgePath);
+            
+            this.saga = new ReportingSaga(this.bot, this.bridge, this.projector, (msg) => this.log(msg));
+            this.saga.setStatePath(bridgePath);
+
+            this.processor = new EventProcessor(bridgePath, this.projector, this.saga, (msg) => this.log(msg));
+            
+            this.saga.start();
+            this.processor.start(5000); // Decoupled Event Processing Cycle
+
             // Start Monitoring for agent responses and status updates
             this.bridge.startMonitoring(
                 (chatId, text) => {
-                    // Cleanup progress message if it exists
-                    this.clearProgressMessage(chatId);
-                    this.bot?.api.sendMessage(chatId, text).catch(e => this.log(`Failed to send response: ${e.message}`));
+                    // NOTE: The Saga now handles final delivery once the turn settles.
+                    // We still log the detection here for debugging.
+                    this.log(`[bot] Bridge message detected for ${chatId}`);
                 },
                 (chatId, title) => {
-                    this.handleStatusUpdate(chatId, title);
+                    // Legacy status update no longer needed, saga handles this via events
+                    this.log(`[bot] Status event: ${title}`);
+                    this.bot?.api.sendChatAction(chatId, 'typing').catch(() => {});
                 },
                 (msg) => this.log(msg)
             );
@@ -98,9 +109,21 @@ export class TelegramBotManager {
      * Stops the bot runner.
      */
     async stop() {
-        if (this.bridgeManager) {
-            this.bridgeManager.stop();
-            this.bridgeManager = null;
+        if (this.processor) {
+            // Final effort to deliver any pending system notifications
+            await this.processor.flush();
+            this.processor.stop();
+            this.processor = null;
+        }
+
+        if (this.saga) {
+            this.saga.stop();
+            this.saga = null;
+        }
+
+        if (this.bridge) {
+            this.bridge.stop();
+            this.bridge = null;
         }
 
         if (this.runner && this.runner.isRunning()) {
@@ -119,23 +142,60 @@ export class TelegramBotManager {
     }
 
     public getBridgeMetrics() {
-        return this.bridgeManager?.getStatusMetircs();
+        const bridgePath = vscode.workspace.getConfiguration('better-antigravity.telegram').get<string>('bridgePath') || '/config/gravity-claw/telegram_bridge';
+        const fs = require('fs');
+        const path = require('path');
+        const count = (dir: string) => {
+            const p = path.join(bridgePath, 'events', dir);
+            return fs.existsSync(p) ? fs.readdirSync(p).length : 0;
+        };
+        return {
+            inbox: count('inbox'),
+            pending: count('pending'),
+            archive: count('archive'),
+            error: count('error')
+        };
+    }
+
+    public getErrorFiles() {
+        const bridgePath = vscode.workspace.getConfiguration('better-antigravity.telegram').get<string>('bridgePath') || '/config/gravity-claw/telegram_bridge';
+        const fs = require('fs');
+        const path = require('path');
+        const errorDir = path.join(bridgePath, 'events', 'error');
+        if (!fs.existsSync(errorDir)) return [];
+        return fs.readdirSync(errorDir).filter((f: string) => f.endsWith('.json'));
+    }
+
+    public clearErrors() {
+        const files = this.getErrorFiles();
+        const bridgePath = vscode.workspace.getConfiguration('better-antigravity.telegram').get<string>('bridgePath') || '/config/gravity-claw/telegram_bridge';
+        const fs = require('fs');
+        const path = require('path');
+        let count = 0;
+        for (const file of files) {
+            try {
+                fs.unlinkSync(path.join(bridgePath, 'events', 'error', file));
+                count++;
+            } catch {}
+        }
+        return count;
     }
 
     /**
      * Sends a lifecycle notification (Start/Stop) to the configured users.
      */
     public async notifyLifecycle(message: string) {
-        const config = vscode.workspace.getConfiguration('better-antigravity.telegram');
-        const allowedIds = config.get<number[]>('allowedUserIds', []);
-        
-        if (this.bot && allowedIds.length > 0) {
-            try {
-                // Notify the first allowed user (usually the developer)
-                await this.bot.api.sendMessage(allowedIds[0], message, { parse_mode: 'Markdown' });
-            } catch (err: any) {
-                this.log(`Failed to send lifecycle notification: ${err.message}`);
-            }
+        this.log(`[bot] Lifecycle notification: ${message}`);
+        const bus = require('./events').BridgeEventBus.getInstance();
+        bus.emitEvent({
+            type: 'SYSTEM',
+            timestamp: Date.now(),
+            data: { status: 'LIFECYCLE', message }
+        });
+
+        // Critical: Flush immediately during lifecycle transitions
+        if (this.processor) {
+            await this.processor.flush();
         }
     }
 
@@ -144,36 +204,6 @@ export class TelegramBotManager {
      */
     showLogs() {
         this.output.show(true);
-    }
-
-    /**
-     * Updates/Sends a progress message and keeps the typing indicator alive.
-     */
-    private async handleStatusUpdate(chatId: number, title: string) {
-        try {
-            // 1. Keep typing indicator alive
-            this.bot?.api.sendChatAction(chatId, 'typing').catch(() => {});
-
-            const progressText = `_⏳ ${title}_`;
-
-            // 2. Manage the progress message (Single message that gets edited)
-            if (this.progressMessages.has(chatId)) {
-                const msgId = this.progressMessages.get(chatId)!;
-                try {
-                    await this.bot?.api.editMessageText(chatId, msgId, progressText, { parse_mode: 'Markdown' });
-                } catch (err: any) {
-                    // If message was deleted or can't be edited, just send a new one
-                    if (err.description?.includes("message is not modified")) return;
-                    const newMsg = await this.bot?.api.sendMessage(chatId, progressText, { parse_mode: 'Markdown' });
-                    if (newMsg) this.progressMessages.set(chatId, newMsg.message_id);
-                }
-            } else {
-                const newMsg = await this.bot?.api.sendMessage(chatId, progressText, { parse_mode: 'Markdown' });
-                if (newMsg) this.progressMessages.set(chatId, newMsg.message_id);
-            }
-        } catch (err: any) {
-            this.log(`Error in handleStatusUpdate: ${err.message}`);
-        }
     }
 
     /**
@@ -194,20 +224,16 @@ export class TelegramBotManager {
      * Deletes the progress message for a chat.
      */
     private async clearProgressMessage(chatId: number) {
-        if (this.progressMessages.has(chatId)) {
-            const msgId = this.progressMessages.get(chatId)!;
-            this.progressMessages.delete(chatId);
-            try {
-                await this.bot?.api.deleteMessage(chatId, msgId);
-            } catch {
-                // Ignore errors if message already deleted
-            }
-        }
+        this.saga?.clearProgress(chatId);
     }
 
     public log(msg: string) {
         const ts = new Date().toISOString().substring(11, 19);
         this.output.appendLine(`[telegram] [${ts}] ${msg}`);
+        try {
+            const fs = require('fs');
+            fs.appendFileSync('/config/gravity-claw/telegram_bridge_debug.log', `[${ts}] [telegram] ${msg}\n`);
+        } catch {}
     }
 }
 

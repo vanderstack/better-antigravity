@@ -3,6 +3,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { AntigravitySDK } from 'antigravity-sdk';
 import { TracingManager } from '../tracing';
+import { BridgeEventBus } from './events';
+import { HeartbeatGenerator } from './heartbeat';
 
 export interface TelegramTurnInput {
     text: string;
@@ -13,9 +15,6 @@ export interface TelegramTurnInput {
 
 /**
  * AntigravityBridge - Maps Telegram events to Antigravity SDK actions.
- * 
- * This follows the "Engine Bridge" pattern from OpenClaw, ensuring that
- * the bot logic doesn't need to know the inner workings of the SDK.
  */
 export class AntigravityBridge {
     private sessions: Map<number, string> = new Map();
@@ -23,13 +22,41 @@ export class AntigravityBridge {
     private lastStepCount: Map<string, number> = new Map();
     private onResponseCallback: ((chatId: number, text: string) => void) | null = null;
     private onStatusCallback: ((chatId: number, title: string) => void) | null = null;
+    private eventBus: BridgeEventBus;
+
+    private monitorDisposable: { dispose: () => void } | null = null;
 
     constructor(
         private readonly sdk: AntigravitySDK,
         private readonly bridgePath: string,
         private readonly tracing?: TracingManager
     ) {
+        this.eventBus = BridgeEventBus.getInstance();
         this.loadSessions();
+        
+        this.eventBus.emitEvent({
+            type: 'SYSTEM',
+            timestamp: Date.now(),
+            data: { status: 'STARTED', message: 'AntigravityBridge initialized' }
+        });
+    }
+
+    public stop() {
+        if (this.monitorDisposable) {
+            this.monitorDisposable.dispose();
+            this.monitorDisposable = null;
+        }
+        // If the SDK monitor has a stop method, call it
+        if ((this.sdk.monitor as any).stop) {
+            (this.sdk.monitor as any).stop();
+        }
+        this.onResponseCallback = null;
+        this.onStatusCallback = null;
+        this.eventBus.emitEvent({
+            type: 'SYSTEM',
+            timestamp: Date.now(),
+            data: { status: 'STOPPED', message: 'AntigravityBridge stopped' }
+        });
     }
 
     /**
@@ -58,6 +85,15 @@ export class AntigravityBridge {
                 this.saveSessions();
                 log(`✅ Mechanism 1 Success: Injected into ${result.substring(0, 8)}...`);
                 
+                // Signal a new turn to the event stream
+                this.eventBus.emitEvent({
+                    type: 'USER_MESSAGE',
+                    sessionId: result,
+                    chatId: input.chatId,
+                    timestamp: Date.now(),
+                    data: { text: text.substring(0, 50) }
+                });
+
                 // Fire-and-forget focus so it doesn't block
                 this.sdk.ls.focusCascade(result).catch(e => log(`⚠️ Focus failed: ${e.message}`));
                 return;
@@ -135,6 +171,44 @@ export class AntigravityBridge {
         }
     }
 
+    /**
+     * Extracts the final model response from a session's trajectory.
+     */
+    async getFinalResponse(sessionId: string): Promise<{ text: string, parseMode: 'Markdown' | 'HTML' } | null> {
+        try {
+            const resp = await (this.sdk.ls as any).rawRPC('GetCascadeTrajectory', { cascadeId: sessionId });
+            if (!resp || !resp.trajectory || !resp.trajectory.steps) return null;
+
+            const steps = resp.trajectory.steps;
+            // Iterate backwards to find the last model/user-facing message
+            for (let i = steps.length - 1; i >= 0; i--) {
+                const step = steps[i];
+                let content: string | null = null;
+
+                if (step.type === 'CORTEX_STEP_TYPE_NOTIFY_USER' && step.notifyUser?.message) {
+                    content = step.notifyUser.message;
+                } else if (step.metadata?.source === 'CORTEX_STEP_SOURCE_MODEL' || step.source === 'CHAT_MESSAGE_SOURCE_MODEL') {
+                    content = step.prompt || (step.data as any)?.content || (step as any).content;
+                }
+
+                if (content && content.length > 0) {
+                    let parseMode: 'Markdown' | 'HTML' = 'Markdown';
+                    if (content.includes('</') || (content.includes('<') && content.includes('>'))) {
+                        const unsafeTags = /<(div|script|style|iframe|body|html|h[1-6]|ul|li|ol|p|br)/i;
+                        if (unsafeTags.test(content)) {
+                            content = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            parseMode = 'HTML';
+                        } else {
+                            parseMode = 'HTML';
+                        }
+                    }
+                    return { text: content, parseMode };
+                }
+            }
+        } catch {}
+        return null;
+    }
+
     private saveSessions(): void {
         try {
             const dataPath = path.join(this.bridgePath, 'bridge_state.json');
@@ -170,187 +244,88 @@ export class AntigravityBridge {
     ): void {
         this.onResponseCallback = onResponse;
         this.onStatusCallback = onStatus;
+        log('Agent response monitoring starting...');
 
-        this.sdk.monitor.onStepCountChanged(async (e) => {
+        this.monitorDisposable = this.sdk.monitor.onStepCountChanged(async (e) => {
             const chatId = this.cascadeToChat.get(e.sessionId);
             if (!chatId) return;
 
-            // Log and notify of the new status (Thinking, Reading, etc.)
+            this.eventBus.emitEvent({
+                type: 'STEP_CHANGE',
+                sessionId: e.sessionId,
+                chatId: chatId,
+                timestamp: Date.now(),
+                data: { title: e.title, newCount: e.newCount }
+            });
+
             log(`[monitor] Step change: "${e.title}" in session ${e.sessionId.substring(0, 8)}`);
             if (this.onStatusCallback) {
                 this.onStatusCallback(chatId, e.title || "Thinking...");
             }
 
             try {
-                // Try several methods to get the conversation data
-                let convo: any = null;
-                const tryGet = async (id: string, label: string) => {
-                    try {
-                        const res = await (this.sdk.ls as any).rawRPC('GetConversation', { cascadeId: id });
-                        if (res) {
-                            log(`[monitor] GetConversation Success (${label})`);
-                            this.tracing?.dumpPayload(`GetConversation_${label}_${id}`, res);
-                            return res;
-                        }
-                    } catch (err: any) {
-                        log(`[monitor] GetConversation 404 (${label}): ${err.message}`);
-                    }
-                    return null;
-                };
-
-                // Try 1: googleAgentId (Standard)
-                convo = await tryGet(e.sessionId, 'googleAgentId');
-
-                // Try 2: trajectoryId
-                if (!convo) {
-                    await this.sdk.cascade.refreshSessions();
-                    const sessions = await this.sdk.cascade.getSessions();
-                    const session = sessions.find(s => s.id === e.sessionId);
-                    const tId = (session as any)?.trajectoryId;
-                    
-                    if (tId) {
-                        convo = await tryGet(tId, 'trajectoryId');
-                    } else {
-                        log(`[monitor] No trajectoryId found even after refresh.`);
-                    }
-                }
-
-                // Try 3: listCascades and find
-                if (!convo) {
-                    log(`[monitor] Trying listCascades...`);
-                    try {
-                        const list = await this.sdk.ls.listCascades();
-                        const entry = list[e.sessionId] || Object.values(list).find((v: any) => v.googleAgentId === e.sessionId);
-                        if (entry) {
-                            log(`[monitor] List Entry for ${e.sessionId.substring(0, 8)}: ${JSON.stringify(entry, null, 2)}`);
-                            if (entry.trajectory) {
-                                log(`[monitor] Found steps in listCascades!`);
-                                convo = entry;
-                            }
-                        }
-                    } catch (err: any) {
-                        log(`[monitor] listCascades failed: ${err.message}`);
-                    }
-                }
-
-                // Try 4: Alternative RPCs and Service Names
-                if (!convo) {
-                    const services = ['exa.language_server_pb.LanguageServerService', 'jetski.LanguageServerService', 'antigravity.LanguageServerService'];
-                    const methods = ['GetConversation', 'GetTrajectory', 'GetCascade', 'GetThread', 'GetConversationSteps'];
-                    
-                    log(`[monitor] Probing alternate RPCs...`);
-                    for (const s of services) {
-                        for (const m of methods) {
-                            try {
-                                const url = `/${s}/${m}`;
-                                const res = await (this.sdk.ls as any).rawRPC(m, { cascadeId: e.sessionId }); // Note: rawRPC currently prepends exa service
-                                if (res && (res.trajectory || res.steps || res.items)) {
-                                    log(`[monitor] SUCCESS: ${url} returned data!`);
-                                    convo = res;
-                                    break;
-                                }
-                            } catch {}
-                        }
-                        if (convo) break;
-                    }
-                }
-
-                // Try 5: VSCDB Deep Scan
-                if (!convo) {
-                    log(`[monitor] Scanning VSCDB for session data...`);
-                    try {
-                        const keys = await this.sdk.state.getAntigravityKeys();
-                        const sessionKeys = keys.filter(k => 
-                            k.includes(e.sessionId) || 
-                            k.includes(e.sessionId.substring(0, 8))
-                        );
-                        log(`[monitor] Specific Keys (${sessionKeys.length}): ${sessionKeys.join(', ')}`);
-                        
-                        // Look for the prompt text "Hello world" in VSCDB to find the right key
-                        log(`[monitor] Searching all VSCDB values for prompt text...`);
-                        for (const k of keys) {
-                            if (k.startsWith('antigravityUnifiedStateSync.') || k.startsWith('chat.')) {
-                                const val = await this.sdk.state.getRawValue(k);
-                                if (val && val.includes('Hello world')) {
-                                    log(`[monitor] FOUND prompt in key: ${k} (Length: ${val.length})`);
-                                    log(`[monitor] Value preview: ${val.substring(0, 200)}`);
-                                }
-                            }
-                        }
-
-                        // Log a few promising values if we found session keys
-                        for (const k of sessionKeys.slice(0, 3)) {
-                            const val = await this.sdk.state.getRawValue(k);
-                            log(`[monitor] Value of ${k}: ${val ? val.substring(0, 100) : 'null'}`);
-                        }
-                    } catch (err: any) {
-                        log(`[monitor] VSCDB scan failed: ${err.message}`);
-                    }
-                }
-
-                // Try 6: More RPC Probing
-                if (!convo) {
-                    const probeMethods = ['GetSteps', 'GetHistory', 'GetMessages', 'GetThreadDetails', 'GetCascadeDetails'];
-                    log(`[monitor] Probing extended RPC methods...`);
-                    for (const m of probeMethods) {
-                        try {
-                            const res = await (this.sdk.ls as any).rawRPC(m, { cascadeId: e.sessionId });
-                            if (res) {
-                                log(`[monitor] RPC ${m} Success! Keys: ${Object.keys(res).join(', ')}`);
-                                if (res.trajectory || res.steps || res.items) {
-                                    convo = res;
-                                    break;
-                                }
-                            }
-                        } catch {}
-                    }
-                }
-
-                // If RPCs failed, try to extract from getDiagnostics (which we know works)
-                if (!convo) {
-                    const diag = await this.sdk.cascade.getDiagnostics();
-                    const trajectories = (diag.raw as any).recentTrajectories || [];
-                    const traj = trajectories.find((t: any) => t.googleAgentId === e.sessionId);
-                    
-                    if (traj && traj.steps) {
-                        log(`[monitor] Found steps directly in diagnostics!`);
-                        convo = { trajectory: { steps: traj.steps } };
-                    } else if (traj) {
-                        log(`[monitor] Traj entry found in diag (keys: ${Object.keys(traj).join(', ')}), but no steps.`);
-                    }
-                }
-
-                if (!convo) {
-                    log(`[monitor] All retrieval attempts failed for ${e.sessionId}`);
+                // Use the verified RPC method and service
+                const resp = await (this.sdk.ls as any).rawRPC('GetCascadeTrajectory', { cascadeId: e.sessionId });
+                if (!resp || !resp.trajectory) {
+                    log(`[monitor] GetCascadeTrajectory returned no trajectory for ${e.sessionId.substring(0, 8)}`);
                     return;
                 }
 
-                const steps = convo?.trajectory?.steps || [];
+                const trajectory = resp.trajectory;
+                const steps = trajectory.steps || [];
                 const prevCount = this.lastStepCount.get(e.sessionId) || 0;
                 this.lastStepCount.set(e.sessionId, e.newCount);
 
-                // Look for assistant messages in the new steps
+                this.eventBus.emitEvent({
+                    type: 'PROGRESS',
+                    sessionId: e.sessionId,
+                    chatId: chatId,
+                    timestamp: Date.now(),
+                    data: { prevCount, newCount: steps.length }
+                });
+
+                log(`[monitor] Processing steps ${prevCount} to ${steps.length} for ${e.sessionId.substring(0, 8)}`);
+
                 for (let i = prevCount; i < steps.length; i++) {
                     const step = steps[i];
-                    log(`[monitor] Inspecting step ${i}: type=${step.type}, role=${step.data?.role}`);
-                    
-                    // Assistant messages can be identified by type or role
-                    if ((step.type === 'SystemMessage' || step.type === 'AssistantMessage') && step.data?.role === 'assistant') {
-                        const content = step.data?.content;
-                        if (content && this.onResponseCallback) {
-                            log(`[monitor] Found assistant content (${content.length} chars). Routing to Telegram...`);
-                            this.onResponseCallback(chatId, content);
-                        }
-                    } else if (step.type === 'AssistantMessage' || (step.type as string) === 'assistant') {
-                         const content = step.data?.content || step.data?.text || (step as any).text;
-                         if (content && this.onResponseCallback) {
-                            log(`[monitor] Found assistant content (alt type) in step ${i}. Routing...`);
-                            this.onResponseCallback(chatId, content);
-                         }
+                    let content: string | null = null;
+
+                    // Support different message structures found in Antigravity
+                    if (step.type === 'CORTEX_STEP_TYPE_NOTIFY_USER' && step.notifyUser?.message) {
+                        content = step.notifyUser.message;
+                        log(`[monitor] Detected NotifyUser message in step ${i}`);
+                    } else if (step.metadata?.source === 'CORTEX_STEP_SOURCE_MODEL' || step.source === 'CHAT_MESSAGE_SOURCE_MODEL') {
+                        // Regular assistant response
+                        content = step.prompt || (step.data as any)?.content || (step as any).content;
+                        log(`[monitor] Detected Model message in step ${i}`);
+                    }
+
+                    if (content) {
+                        this.eventBus.emitEvent({
+                            type: 'MESSAGE_DETECTED',
+                            sessionId: e.sessionId,
+                            chatId: chatId,
+                            timestamp: Date.now(),
+                            data: { stepIndex: i, contentLength: content.length }
+                        });
+                    }
+
+                    if (content) {
+                        this.eventBus.emitEvent({
+                            type: 'MESSAGE_DETECTED',
+                            sessionId: e.sessionId,
+                            chatId: chatId,
+                            timestamp: Date.now(),
+                            data: { stepIndex: i, contentLength: content.length }
+                        });
+                        
+                        // NOTE: Intermediate messages are no longer sent immediately.
+                        // The Saga will fetch and send the final response when the turn settles.
+                        log(`[monitor] Model response detected in step ${i}. Waiting for turn to settle...`);
                     }
                 }
             } catch (err: any) {
-                log(`[monitor] Error fetching conversation ${e.sessionId}: ${err.message}`);
+                log(`[monitor] Error in response detection: ${err.message}`);
             }
         });
 
